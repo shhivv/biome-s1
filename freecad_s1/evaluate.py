@@ -92,7 +92,12 @@ def online_metrics(model: S1Model, device: torch.device, suites=("iid", "comp", 
     from .runtime.client import VecEnv
 
     policy = Policy(model, device)
-    vec = VecEnv(workers)
+    if model.cfg.ui:  # UI-level model: hidden FreeCAD GUIs (keep workers small, ~1 GB each)
+        from .ui.env import UiVecEnv
+
+        vec = UiVecEnv(workers)
+    else:
+        vec = VecEnv(workers)
     results = []
     try:
         for suite in suites:

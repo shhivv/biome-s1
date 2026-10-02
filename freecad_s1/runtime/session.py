@@ -60,6 +60,7 @@ class UndoEntry:
     meta: Meta
     sel_refs: list
     doc_tx: bool
+    n_tx: int = 1  # FreeCAD transactions to undo (a GUI task dialog may commit more than one)
 
 
 class _Observer:
@@ -274,8 +275,12 @@ class HeadlessSession:
         return enumerate_actions(state or self.state())
 
     def expert(self) -> list[str]:
-        """Acceptable actions; empty when the state is unrecoverable (the
-        off-plan change is older than FreeCAD's undo history)."""
+        return self.command_expert()
+
+    def command_expert(self) -> list[str]:
+        """Acceptable command-level actions; empty when the state is
+        unrecoverable (the off-plan change is older than FreeCAD's undo
+        history). Subclasses that act on other interfaces override `expert`."""
         acts = expert_actions(self.goal, self.meta)
         if acts == ["Std_Undo"] and not self.undo_stack:
             return []
@@ -288,7 +293,7 @@ class HeadlessSession:
 
     def step(self, action: str) -> dict:
         """Execute `action`. Returns {"changed", "error", "done", "on_plan"}."""
-        on_plan = action in self.expert()
+        on_plan = action in self.command_expert()
         info = {"changed": False, "error": None, "done": False, "on_plan": on_plan}
         spec = CATALOGUE.get(action)
         if spec is None:
@@ -354,7 +359,7 @@ class HeadlessSession:
 
     def _push_undo(self, entry: UndoEntry) -> None:
         self.undo_stack.append(entry)
-        while sum(e.doc_tx for e in self.undo_stack) > UNDO_LIMIT:
+        while sum(e.n_tx for e in self.undo_stack if e.doc_tx) > UNDO_LIMIT:
             while not self.undo_stack.pop(0).doc_tx:
                 pass
 
@@ -363,7 +368,8 @@ class HeadlessSession:
             return False
         entry = self.undo_stack.pop()
         if entry.doc_tx:
-            self.doc.undo()
+            for _ in range(entry.n_tx):
+                self.doc.undo()
             self.doc.recompute()
         workbench = self.meta.workbench
         self.meta = entry.meta

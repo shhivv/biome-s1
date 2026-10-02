@@ -1,0 +1,106 @@
+# Teacher rollouts through the real FreeCAD UI (clean + noisy); run in the GUI.
+#   python scripts/smoke_ui.py  (launches this hidden and prints the report)
+# Env: S1_REPO (repo root), S1_OUT (report JSON path), S1_N (sampled goals per level), S1_SEED,
+#      S1_MAX_GOALS (0 = all), S1_TRACE (optional step log).
+import os, sys, json, random, time, traceback, collections
+sys.path.insert(0, os.environ["S1_REPO"])
+from freecad_s1.ui.launch import self_guard
+self_guard()  # memory cap / deadline / launcher-alive check, see ui/launch.py
+out_path = os.environ["S1_OUT"]
+trace_fh = open(os.environ.get("S1_TRACE", os.devnull), "w")  # last lines locate a crash
+report = {"stats": {}, "failures": []}
+try:
+    from freecad_s1.goals import StartSpec, sample_goal, sample_start
+    from freecad_s1.runtime.episode import GoalBuildError, build_target, score, step_budget
+    from freecad_s1.runtime.session import HeadlessSession
+    from freecad_s1.schema import Goal, GoalFeature
+    from freecad_s1.ui.session import UiSession
+    from freecad_s1.ui.spec import role
+
+    F = GoalFeature
+    BOX = F("base_box", {"w": 40, "d": 30, "h": 10})
+    FIXED = [  # every feature kind at least once
+        [BOX, F("pocket_rect", {"w": 8, "d": 6, "x": 6, "y": 4, "depth": 3}), F("fillet_top", {"r": 1})],
+        [BOX, F("hole_std", {"r": 2, "x": 8, "y": 3}), F("chamfer_top", {"size": 1})],
+        [F("base_cyl", {"r": 30, "h": 10}), F("hole", {"r": 3, "x": 15, "y": 0}), F("polar_pattern", {"n": 6})],
+        [BOX, F("hole", {"r": 2, "x": -12, "y": 0}), F("linear_pattern", {"n": 3, "length": 20})],
+        [BOX, F("boss_cyl", {"r": 3, "x": 10, "y": 0, "h": 5}), F("mirror", {})],
+        [F("base_hex", {"r": 20, "h": 8}), F("boss_box", {"w": 6, "d": 6, "x": 0, "y": 0, "h": 4})],
+        [F("base_ring", {"ri": 10, "ro": 18, "h": 8})],
+        [BOX, F("shell", {"t": 1.5})],
+        [BOX, F("fillet_vertical", {"r": 2})],
+    ]
+    seed = int(os.environ.get("S1_SEED", "0"))
+    n_sampled = int(os.environ.get("S1_N", "3"))
+    rng = random.Random(seed)
+    goals = [("fixed", Goal(f, level=3, scale=40)) for f in FIXED]
+    for level in (1, 2, 3):
+        goals += [(f"L{level}", sample_goal(level, rng)) for _ in range(n_sampled)]
+
+    max_goals = int(os.environ.get("S1_MAX_GOALS", "0"))
+    if max_goals:
+        goals = goals[:max_goals]
+
+    builder = HeadlessSession()
+    s = UiSession()
+    stats = collections.Counter()
+    t0 = time.time()
+    n_steps = 0
+    for tag, goal in goals:
+        try:
+            target = build_target(builder, goal)
+        except GoalBuildError:
+            stats["infeasible"] += 1
+            continue
+        for noise in (0.0, 0.25):
+            start = sample_start(rng, 3) if tag != "fixed" else StartSpec()
+            s.reset(goal, start)
+            budget = (step_budget(goal, start) + 6 * len(goal.features)) * (3 if noise else 1)
+            trace = []
+            for t in range(budget):
+                st = s.state()
+                valid = s.valid_actions(st)
+                exp = s.expert()
+                if not exp:
+                    stats["unrecoverable"] += 1
+                    break
+                bad = [a for a in exp if a not in valid]
+                if bad:
+                    stats["expert_invalid"] += 1
+                    report["failures"].append({"kind": "expert_invalid", "bad": bad, "valid": valid, "trace": trace[-12:],
+                                               "ui": st.ui})
+                    break
+                a = rng.choice([x for x in valid if x != "Done"]) if rng.random() < noise else exp[0]
+                trace_fh.write(f"{tag} noise={noise} t={t} {a}\n")
+                trace_fh.flush()
+                info = s.step(a)
+                n_steps += 1
+                stats["steps_" + role(a)] += 1
+                trace.append(a + (f" !! {info['error']}" if info["error"] else ""))
+                if info["error"]:
+                    stats["errors"] += 1
+                    stats["err:" + info["error"][:70]] += 1
+                tx = sum(e.n_tx for e in s.undo_stack if e.doc_tx)
+                if s.doc is not None and s.pending is None and tx != min(20, s.doc.UndoCount):
+                    stats["undo_desync"] += 1
+                    report["failures"].append({"kind": "undo_desync", "after": a, "UndoCount": s.doc.UndoCount,
+                                               "UndoNames": list(s.doc.UndoNames), "tx": tx, "trace": trace[-12:]})
+                    break
+                if info["done"]:
+                    break
+            sc = score(s, target)
+            key = f"{tag}_noise{noise}"
+            stats[key + "_n"] += 1
+            stats[key + "_match"] += int(s.done and sc["match"])
+            if not (s.done and sc["match"]):
+                report["failures"].append({"kind": "episode", "key": key, "goal": [f.kind for f in goal.features],
+                                           "done": s.done, "iou": sc["iou"], "trace": trace[-25:],
+                                           "messages": s.messages[-5:]})
+    stats["seconds"] = round(time.time() - t0, 1)
+    stats["ms_per_step"] = round(1000 * (time.time() - t0) / max(n_steps, 1), 1)
+    report["stats"] = dict(stats)
+except Exception:
+    report["fatal"] = traceback.format_exc()
+with open(out_path, "w") as fh:
+    json.dump(report, fh, indent=1, default=str)
+os._exit(0)

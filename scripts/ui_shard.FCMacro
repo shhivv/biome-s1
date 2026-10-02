@@ -1,0 +1,24 @@
+# One UI data-generation shard; runs inside a hidden FreeCAD GUI.
+# Launched by `python -m freecad_s1.ui.datagen` (never by hand: it relies on the watchdog).
+# Env: S1_REPO, S1_OUT_DIR, S1_SHARD, S1_SEED, S1_EPISODES ("L1 L2 L3"), plus the guard's S1_* limits.
+import os, sys, json, traceback
+sys.path.insert(0, os.environ["S1_REPO"])
+from freecad_s1.ui.launch import self_guard
+self_guard()  # memory cap / deadline / launcher-alive check, see ui/launch.py
+from pathlib import Path
+
+out = Path(os.environ["S1_OUT_DIR"])
+shard = int(os.environ["S1_SHARD"])
+summary_path = out / f"shard{shard:03d}.summary.json"
+try:
+    from freecad_s1.datagen import run_shard
+    from freecad_s1.runtime.session import HeadlessSession
+    from freecad_s1.ui.session import UiSession
+    from freecad_s1.ui.spec import ui_step_budget
+
+    summary = run_shard(out, shard, [int(x) for x in os.environ["S1_EPISODES"].split()], int(os.environ["S1_SEED"]),
+                        session=UiSession(), target_session=HeadlessSession(), budget_fn=ui_step_budget)
+except Exception:
+    summary = {"shard": shard, "error": traceback.format_exc()}
+summary_path.write_text(json.dumps(summary))
+os._exit(0)

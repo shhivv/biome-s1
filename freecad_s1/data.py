@@ -12,14 +12,21 @@ from pathlib import Path
 import numpy as np
 
 from .actions import CATALOGUE
+from .ui import spec as UIS
 from .model.featurize import Example, make_example
 from .schema import Goal, State
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 
 def label_category(acceptable: list[str]) -> str:
     a = acceptable[0]
+    role = UIS.role(a)
+    if role in ("set", "opt", "toggle"):
+        return "ui_field"
+    if role == "click":
+        return "ui_ok" if a == UIS.OK else "ui_cancel"
+    a = UIS.underlying(a) or a
     if a == "Std_Undo":
         return "undo"
     if a.startswith("Select:"):

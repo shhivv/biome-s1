@@ -24,10 +24,17 @@ _SERVER = None  # keep a reference so the Qt timer is not garbage-collected
 
 
 class GuiServer:
-    def __init__(self, port: int = 8765) -> None:
+    def __init__(self, port: int = 8765, ui: bool = False) -> None:
+        """`ui`: serve a UI-level session (freecad_s1/ui) instead of GuiSession."""
         from PySide import QtCore
 
-        self.worker = Worker(GuiSession(), HeadlessSession())
+        if ui:
+            from ..ui.session import UiSession
+            from ..ui.spec import ui_step_budget
+
+            self.worker = Worker(UiSession(), HeadlessSession(), budget_fn=ui_step_budget)
+        else:
+            self.worker = Worker(GuiSession(), HeadlessSession())
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind(("127.0.0.1", port))
@@ -66,6 +73,11 @@ class GuiServer:
             self.conn.close()
             self.conn = None
             return
+        if req.get("op") == "exit":  # quit FreeCAD itself (servers launched by freecad_s1.ui.env)
+            import os
+
+            self.conn.close()
+            os._exit(0)
         try:
             resp = {"ok": True, **self.worker.handle(req)}
         except Exception as exc:
@@ -75,8 +87,8 @@ class GuiServer:
         self.conn.setblocking(False)
 
 
-def start(port: int = 8765) -> GuiServer:
+def start(port: int = 8765, ui: bool = False) -> GuiServer:
     global _SERVER
     if _SERVER is None:
-        _SERVER = GuiServer(port)
+        _SERVER = GuiServer(port, ui=ui)
     return _SERVER

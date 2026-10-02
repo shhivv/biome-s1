@@ -13,6 +13,13 @@ document order and parent depth so the encoder sees the tree as a sequence.
 
 Candidate actions are encoded independently of the state: catalogue id,
 category, scope, word pieces of the command name, and an argument vector.
+
+UI-level models (`ui=True`, see freecad_s1/ui) act on interface elements
+(`cmd:PartDesign_Pad`, `set:lengthEdit`, `opt:changeMode=Through all`, ...).
+An element is encoded through the command it stands for (if any), the word
+pieces of its full id, its role, and a small vector of live widget values
+from `State.ui` (the number in a field, whether a combo entry is current or a
+check box is checked). Recent-action tokens carry the element's role.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ import numpy as np
 
 from ..actions import (ACTION_IDS, CATALOGUE, CATEGORIES, SCOPES, SOLID_FEATURE_TYPES, WORD_VOCAB, action_vector,
                        action_words)
+from ..ui import spec as UIS
 from ..schema import (
     CONSTRAINT_KINDS, GEOMETRY_KINDS, GOAL_KINDS, GOAL_LENGTH_KEYS, GOAL_PARAM_KEYS, LENGTH_KEYS,
     NODE_NUM_KEYS, NODE_TYPES, SELECTION_KINDS, WORKBENCHES, Goal, State,
@@ -38,6 +46,11 @@ MAX_SEL = 4
 MAX_GOAL = 24
 MAX_WORDS = 8
 ACT_VEC_DIM = 6
+UI_VEC_DIM = 6
+UI_ROLES = UIS.ROLES
+_ROLE = {r: i for i, r in enumerate(UI_ROLES)}
+UI_WORD_VOCAB = WORD_VOCAB + sorted({w for e in UIS.UI_ID_EXAMPLES for w in action_words(e)} - set(WORD_VOCAB))
+_UI_WORD = {w: i for i, w in enumerate(UI_WORD_VOCAB)}
 
 # Primary-id vocab per segment, laid out in one shared embedding table.
 _A_SIZES = [1, len(WORKBENCHES), len(NODE_TYPES), len(SELECTION_KINDS), len(ACTION_IDS), 1, len(GOAL_KINDS)]
@@ -70,7 +83,7 @@ def _clip(x: float, lim: float = 8.0) -> float:
     return float(max(-lim, min(lim, x)))
 
 
-def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bool = False) -> Tokens:
+def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bool = False, ui: bool = False) -> Tokens:
     """`invariant` (H5): drop numeric features whose magnitude grows with the
     length of the build (tree size, number of intents, intents remaining) and
     express face/edge counts relative to the target, so longer goals do not
@@ -78,7 +91,10 @@ def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bo
 
     `sentinel`: append an END intent token (kind id 0, ordinal n+1) after the
     goal list, so "everything is built" is represented like any other intent
-    (used by the modular architecture's pointer)."""
+    (used by the modular architecture's pointer).
+
+    `ui`: recent actions are UI element ids; their tokens get the element's
+    role (an extra `b` range after B_VOCAB, only in UI models)."""
     scale = goal.scale if goal.scale > 0 else 1.0
     tgt_vol = goal.target.volume if goal.target.volume > 0 else scale ** 3
     rows: list[tuple[int, int, int, int, list[float]]] = []
@@ -97,7 +113,8 @@ def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bo
     g = [float(state.doc_open), float(state.has_body), float(state.edit is not None), float(state.undo_available),
          len(state.selection) / 4, float(sh.valid), _clip(sh.volume / tgt_vol),
          *(_clip(x / scale) for x in sh.bbox), faces, edges, float(sh.n_solids),
-         *(float(d in sh.face_dirs) for d in FACE_DIRS), tree_len]
+         *(float(d in sh.face_dirs) for d in FACE_DIRS), tree_len,
+         float(bool(state.ui and state.ui.get("dialog")))]  # a task dialog is open (always 0 for command-level states)
     rows.append((SEG_GLOBAL, _WB.get(state.workbench, 0), 0, 0, g))
 
     # Coupled ordinals (cf. position coupling / index hints): goal intent k and
@@ -131,7 +148,11 @@ def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bo
         rows.append((SEG_SEL, _SEL.get(sel.kind, _SEL["other"]), _NODE_TYPE.get(sel.object_type, 0), i, num))
 
     for i, act in enumerate(reversed(state.recent)):
-        rows.append((SEG_RECENT, _ACT.get(act, 0), 0, i, []))
+        if ui:
+            r = UIS.role(act)
+            rows.append((SEG_RECENT, _ACT.get(UIS.underlying(act) or act, 0), B_VOCAB + _ROLE.get(r, 0), i, []))
+        else:
+            rows.append((SEG_RECENT, _ACT.get(act, 0), 0, i, []))
 
     if invariant:
         gg = [*(_clip(x / scale) for x in t.bbox), _clip(t.volume / scale ** 3)]
@@ -179,33 +200,69 @@ def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bo
     return Tokens(seg, a, b, pos, num, ordinal)
 
 
-_ACTION_CACHE: dict[str, tuple[int, int, int, list[int], list[float]]] = {}
+_ACTION_CACHE: dict[tuple[str, bool], tuple[int, int, int, list[int], list[float], int]] = {}
 
 
-def encode_action(action_id: str) -> tuple[int, int, int, list[int], list[float]]:
-    """(id, category, scope, word ids[MAX_WORDS], arg vector) for one action.
-    Unknown commands (e.g. from a live GUI) keep their word pieces."""
-    hit = _ACTION_CACHE.get(action_id)
+def encode_action(action_id: str, ui: bool = False) -> tuple[int, int, int, list[int], list[float], int]:
+    """(id, category, scope, word ids[MAX_WORDS], arg vector, role) for one
+    action. Unknown commands (e.g. from a live GUI) keep their word pieces.
+    UI element ids are encoded through the command they stand for."""
+    hit = _ACTION_CACHE.get((action_id, ui))
     if hit is not None:
         return hit
-    spec = CATALOGUE.get(action_id)
-    words = [_WORD.get(w, 1) for w in action_words(action_id)][:MAX_WORDS]
+    base = (UIS.underlying(action_id) or action_id) if ui else action_id
+    spec = CATALOGUE.get(base)
+    vocab = _UI_WORD if ui else _WORD
+    words = [vocab.get(w, 1) for w in action_words(action_id)][:MAX_WORDS]
     words += [0] * (MAX_WORDS - len(words))
-    out = (_ACT.get(action_id, 0), _CAT.get(spec.category, 0) if spec else 0,
-           _SCOPE.get(spec.scope, 0) if spec else 0, words, action_vector(action_id))
-    _ACTION_CACHE[action_id] = out
+    role = _ROLE.get(UIS.role(action_id), 0) if ui else 0
+    out = (_ACT.get(base, 0), _CAT.get(spec.category, 0) if spec else 0,
+           _SCOPE.get(spec.scope, 0) if spec else 0, words, action_vector(base), role)
+    _ACTION_CACHE[(action_id, ui)] = out
     return out
 
 
-def encode_actions(actions: list[str]) -> dict[str, np.ndarray]:
-    enc = [encode_action(a) for a in actions]
-    return {
+def ui_vector(element: str, ui_state: dict | None, scale: float) -> list[float]:
+    """Live widget values for a dialog element: [mm value / scale, degrees /
+    360, count / 10, checked, current option, is a dialog widget]."""
+    vec = [0.0] * UI_VEC_DIM
+    role = UIS.role(element)
+    if role not in ("set", "opt", "toggle", "click"):
+        return vec
+    vec[5] = 1.0
+    fld = (ui_state or {}).get("fields", {}).get(UIS.field_name(element)) if role != "click" else None
+    if fld is None:
+        return vec
+    value = fld.get("value")
+    if role == "set" and isinstance(value, (int, float)):
+        unit = fld.get("unit")
+        if unit == "deg":
+            vec[1] = _clip(value / 360.0)
+        elif unit == "count":
+            vec[2] = _clip(value / 10.0)
+        else:
+            vec[0] = _clip(value / scale)
+    elif role == "toggle":
+        vec[3] = float(bool(value))
+    elif role == "opt":
+        vec[4] = float(value == UIS.option_text(element))
+    return vec
+
+
+def encode_actions(actions: list[str], ui: bool = False, ui_state: dict | None = None,
+                   scale: float = 1.0) -> dict[str, np.ndarray]:
+    enc = [encode_action(a, ui) for a in actions]
+    out = {
         "id": np.array([e[0] for e in enc], np.int16),
         "cat": np.array([e[1] for e in enc], np.int8),
         "scope": np.array([e[2] for e in enc], np.int8),
         "words": np.array([e[3] for e in enc], np.int16).reshape(len(enc), MAX_WORDS),
         "vec": np.array([e[4] for e in enc], np.float32).reshape(len(enc), ACT_VEC_DIM),
     }
+    if ui:
+        out["role"] = np.array([e[5] for e in enc], np.int8)
+        out["ui"] = np.array([ui_vector(a, ui_state, scale) for a in actions], np.float32).reshape(len(enc), UI_VEC_DIM)
+    return out
 
 
 @dataclass
@@ -217,9 +274,12 @@ class Example:
 
 
 def make_example(state: State, goal: Goal, actions: list[str], acceptable: list[str] | None = None,
-                 progress: int | None = None, invariant: bool = False, sentinel: bool = False) -> Example:
+                 progress: int | None = None, invariant: bool = False, sentinel: bool = False,
+                 ui: bool = False) -> Example:
     acc = set(acceptable or [])
-    return Example(encode_state(state, goal, invariant, sentinel), encode_actions(actions),
+    scale = goal.scale if goal.scale > 0 else 1.0
+    return Example(encode_state(state, goal, invariant, sentinel, ui),
+                   encode_actions(actions, ui, state.ui, scale),
                    np.array([a in acc for a in actions], dtype=bool), -1 if progress is None else int(progress))
 
 
@@ -245,6 +305,8 @@ def collate(examples: list[Example]):
     scope = np.zeros((bsz, N), np.int64)
     words = np.zeros((bsz, N, MAX_WORDS), np.int64)
     vec = np.zeros((bsz, N, ACT_VEC_DIM), np.float32)
+    role = np.zeros((bsz, N), np.int64)
+    uivec = np.zeros((bsz, N, UI_VEC_DIM), np.float32)
     amask = np.zeros((bsz, N), bool)
     target = np.zeros((bsz, N), bool)
     for i, e in enumerate(examples):
@@ -258,6 +320,8 @@ def collate(examples: list[Example]):
             progress[i] = goal_slots[e.progress] if e.progress < len(goal_slots) else L
         aid[i, :n], cat[i, :n], scope[i, :n] = e.actions["id"], e.actions["cat"], e.actions["scope"]
         words[i, :n], vec[i, :n] = e.actions["words"], e.actions["vec"]
+        if "role" in e.actions:
+            role[i, :n], uivec[i, :n] = e.actions["role"], e.actions["ui"]
         amask[i, :n] = True
         target[i, :n] = e.target
     to = torch.from_numpy
@@ -265,5 +329,5 @@ def collate(examples: list[Example]):
         "seg": to(seg), "a": to(a), "b": to(b), "pos": to(pos), "num": to(num), "token_mask": to(tmask),
         "ord": to(ordinal), "progress": to(progress),
         "act_id": to(aid), "act_cat": to(cat), "act_scope": to(scope), "act_words": to(words),
-        "act_vec": to(vec), "action_mask": to(amask), "target": to(target),
+        "act_vec": to(vec), "act_role": to(role), "act_ui": to(uivec), "action_mask": to(amask), "target": to(target),
     }

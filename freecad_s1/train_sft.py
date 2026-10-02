@@ -100,6 +100,8 @@ def main() -> None:
     ap.add_argument("--modular", action="store_true",
                     help="stage-wise modular policy: actions see only the state + the active intent")
     ap.add_argument("--aux-coef", type=float, default=0.5, help="weight of the progress-pointer loss")
+    ap.add_argument("--ui", action="store_true",
+                    help="UI-level model on data from freecad_s1.ui.datagen (DAgger runs hidden FreeCAD GUIs)")
     ap.add_argument("--max-examples", type=int, default=0, help="subsample training set (0 = all)")
     ap.add_argument("--dagger-rounds", type=int, default=0)
     ap.add_argument("--dagger-episodes", type=int, default=240, help="episodes per level per round")
@@ -117,7 +119,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
-    ap_cfg = S1Config(invariant_numerics=args.invariant_numerics, modular=args.modular)
+    ap_cfg = S1Config(invariant_numerics=args.invariant_numerics, modular=args.modular, ui=args.ui)
     full = load_dataset(args.data, **ap_cfg.feature_opts())
     train, val = full.split()
     if args.max_examples and len(train) > args.max_examples:
@@ -127,7 +129,7 @@ def main() -> None:
     cfg = S1Config(width=args.width, enc_layers=args.enc_layers, dec_layers=args.dec_layers, ff=args.ff,
                    pos_mode=args.pos_mode, ordinal=args.ordinal, progress_head=args.progress_head,
                    invariant_numerics=args.invariant_numerics, modular=args.modular, pointer=args.pointer,
-                   index_eval=args.index_eval, type_dropout=args.type_dropout)
+                   index_eval=args.index_eval, type_dropout=args.type_dropout, ui=args.ui)
     model = S1Model(cfg).to(device)
     print(f"model params: {parameter_count(model):,} on {device}")
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -141,7 +143,12 @@ def main() -> None:
         from .rollout import Policy, run_episodes
         from .runtime.client import VecEnv
 
-        vec = VecEnv(args.dagger_workers)
+        if args.ui:
+            from .ui.env import UiVecEnv
+
+            vec = UiVecEnv(args.dagger_workers)
+        else:
+            vec = VecEnv(args.dagger_workers)
         try:
             for r in range(args.dagger_rounds):
                 collected = Dataset()

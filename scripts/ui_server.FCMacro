@@ -1,0 +1,8 @@
+# UI-level worker server inside a hidden FreeCAD GUI (for evaluation / DAgger).
+# Launched by freecad_s1.ui.env.UiEnv (relies on its watchdog). Env: S1_REPO, S1_PORT, guard limits.
+import os, sys
+sys.path.insert(0, os.environ["S1_REPO"])
+from freecad_s1.ui.launch import self_guard
+self_guard()  # memory cap / deadline / launcher-alive check, see ui/launch.py
+from freecad_s1.runtime.gui_server import start
+start(int(os.environ["S1_PORT"]), ui=True)

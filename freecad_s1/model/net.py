@@ -26,7 +26,7 @@ from ..actions import ACTION_IDS, CATEGORIES, SCOPES, WORD_VOCAB
 from ..actions import CATALOGUE
 from ..schema import NODE_TYPES
 from .featurize import (A_OFFSETS, A_VOCAB, ACT_VEC_DIM, B_VOCAB, MAX_ORD, MAX_POS, N_SEGMENTS, NUM_DIM, SEG_GOAL,
-                        SEG_NODE, SEG_RECENT, SEG_SEL)
+                        SEG_NODE, SEG_RECENT, SEG_SEL, UI_ROLES, UI_VEC_DIM, UI_WORD_VOCAB)
 
 # Functional category of each FreeCAD object type, in the action-category vocab.
 NODE_CATEGORY = {
@@ -39,12 +39,12 @@ NODE_CATEGORY = {
 }
 
 
-def category_tables() -> tuple[torch.Tensor, torch.Tensor]:
-    """(A_VOCAB,) and (B_VOCAB,) maps from token ids to CATEGORIES indices:
+def category_tables(b_vocab: int = B_VOCAB) -> tuple[torch.Tensor, torch.Tensor]:
+    """(A_VOCAB,) and (b_vocab,) maps from token ids to CATEGORIES indices:
     node types and recent-action ids via `a`, selected-object types via `b`."""
     cat = {c: i for i, c in enumerate(CATEGORIES)}
     a_cat = torch.zeros(A_VOCAB, dtype=torch.long)
-    b_cat = torch.zeros(B_VOCAB, dtype=torch.long)
+    b_cat = torch.zeros(b_vocab, dtype=torch.long)
     for i, t in enumerate(NODE_TYPES):
         c = cat.get(NODE_CATEGORY.get(t, ""), 0)
         a_cat[A_OFFSETS[SEG_NODE] + i] = c
@@ -95,10 +95,20 @@ class S1Config:
     # Softmax temperature for reported probabilities (Policy.score); fitted
     # post hoc by scripts/calibrate.py. Does not change the argmax action.
     temperature: float = 1.0
+    # UI-level model (freecad_s1/ui): options are interface elements with a
+    # role and live widget values; recent tokens carry the element role.
+    ui: bool = False
 
     def feature_opts(self) -> dict:
         """Featurization options this model was trained with."""
-        return {"invariant": self.invariant_numerics, "sentinel": self.modular}
+        opts = {"invariant": self.invariant_numerics, "sentinel": self.modular}
+        if self.ui:
+            opts["ui"] = True
+        return opts
+
+    @property
+    def b_vocab(self) -> int:
+        return B_VOCAB + (len(UI_ROLES) if self.ui else 0)
 
 
 def randomize_index(idx: torch.Tensor, table: int, span: int, training: bool, keep_zero: bool = False,
@@ -126,12 +136,12 @@ class StateEncoder(nn.Module):
         super().__init__()
         d = cfg.width
         self.a = nn.Embedding(A_VOCAB, d)
-        self.b = nn.Embedding(B_VOCAB, d)
+        self.b = nn.Embedding(cfg.b_vocab, d)
         self.seg = nn.Embedding(N_SEGMENTS, d)
         self.pos = nn.Embedding(MAX_POS, d)
         self.ord = nn.Embedding(MAX_ORD, d) if cfg.ordinal else None
         if cfg.type_dropout > 0:
-            a_cat, b_cat = category_tables()
+            a_cat, b_cat = category_tables(cfg.b_vocab)
             self.register_buffer("a_cat", a_cat, persistent=False)
             self.register_buffer("b_cat", b_cat, persistent=False)
             self.cat = nn.Embedding(len(CATEGORIES), d)
@@ -184,8 +194,12 @@ class ActionEncoder(nn.Module):
         self.id = nn.Embedding(len(ACTION_IDS), d)
         self.cat = nn.Embedding(len(CATEGORIES), d)
         self.scope = nn.Embedding(len(SCOPES), d)
-        self.words = nn.Embedding(len(WORD_VOCAB), d, padding_idx=0)
+        self.words = nn.Embedding(len(UI_WORD_VOCAB if cfg.ui else WORD_VOCAB), d, padding_idx=0)
         self.vec = nn.Linear(ACT_VEC_DIM, d)
+        if cfg.ui:
+            self.role = nn.Embedding(len(UI_ROLES), d)
+            self.ui_vec = nn.Linear(UI_VEC_DIM, d)
+        self.ui = cfg.ui
         self.mlp = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, cfg.ff), nn.GELU(), nn.Linear(cfg.ff, d))
         self.id_dropout = cfg.id_dropout
 
@@ -197,6 +211,8 @@ class ActionEncoder(nn.Module):
         wmask = w.ne(0).unsqueeze(-1).float()
         words = (self.words(w) * wmask).sum(2) / wmask.sum(2).clamp_min(1)
         x = self.id(ids) + self.cat(batch["act_cat"]) + self.scope(batch["act_scope"]) + words + self.vec(batch["act_vec"])
+        if self.ui:
+            x = x + self.role(batch["act_role"]) + self.ui_vec(batch["act_ui"])
         return x + self.mlp(x)
 
 

@@ -31,12 +31,14 @@ from .session import HeadlessSession, iou
 
 
 class Worker:
-    def __init__(self, session=None, target_session=None) -> None:
+    def __init__(self, session=None, target_session=None, budget_fn=None) -> None:
         """`session` is driven by the policy; targets are built in
         `target_session` when given (the GUI server keeps target construction
-        in a hidden headless session so it never shows up in the window)."""
+        in a hidden headless session so it never shows up in the window).
+        `budget_fn(goal, start)` overrides the step budget (UI sessions)."""
         self.session = session or HeadlessSession()
         self.target_session = target_session
+        self.budget_fn = budget_fn or step_budget
         self.target = None
         self.last_iou = 0.0
 
@@ -65,7 +67,7 @@ class Worker:
                 goal, start, self.target = new_episode(s, int(req["level"]), random.Random(int(req["seed"])),
                                                        split=req.get("split", "train"))
             self.last_iou = 0.0
-            return {"goal": goal.to_json(), "start": asdict(start), "budget": step_budget(goal, start), **self.observe()}
+            return {"goal": goal.to_json(), "start": asdict(start), "budget": self.budget_fn(goal, start), **self.observe()}
         if op == "step":
             info = s.step(req["action"])
             out = {"info": info, **self.observe()}

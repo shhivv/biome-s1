@@ -72,10 +72,28 @@ Also tried without gains: a progress-estimation head alone ([Ma et al. 2019](htt
 | `freecad_s1/runtime/` | FreeCAD runtime: headless and GUI sessions, snapshot, executors, the worker/client RPC and the GUI socket server |
 | `freecad_s1/datagen.py` | Synthetic data generation |
 | `freecad_s1/model/` | Featurization and the PyTorch model, plus `from_pretrained`/`save_pretrained` |
+| `freecad_s1/ui/` | UI-level variant (experimental): acts on FreeCAD's live widget tree, see [UI-level S1](#ui-level-s1-experimental) |
 | `freecad_s1/train_sft.py`, `evaluate.py`, `rollout.py` | Training (SFT + DAgger), evaluation, closed-loop rollouts |
 | `scripts/` | Pipelines (`train_final.sh`, `final_eval.sh`, `chart_evals.sh`, `ablate.sh`), GUI demo, calibration |
 | `viz/` | Remotion project that renders the cover and charts from `results/` (`scripts/export_chart_data.py`, then `viz/render.sh`) |
 | `release/hf/` | The published model: weights, config, card, charts |
+
+## UI-level S1 (experimental)
+
+The released model picks FreeCAD commands, and the GUI runtime fills in their task dialogs behind the scenes. `freecad_s1/ui/` is the next step: the model acts on the interface itself, read from FreeCAD's live Qt widget tree.
+
+- **Elements, not commands.** Options are `cmd:PartDesign_Pad` (the toolbar's QAction), `set:lengthEdit`, `opt:changeMode=Through all`, `toggle:checkBoxReversed`, `click:OK` / `click:Cancel`, `wb:…` and `Done`. Interactions the widget tree cannot see (picking faces in the 3D view, sketch geometry and constraints) stay semantic `canvas:` actions for now.
+- **Same teacher.** The command-level expert still decides what to build; `ui/teacher.py` turns that into clicks: fill the fields that differ from their targets (in any order), then OK, or Cancel a dialog opened by mistake. Values typed into fields come from the parameter stage, as before; combo entries and check boxes are the model's choice.
+- **Same model.** UI models (`S1Config(ui=True)`, `train_sft --ui`) encode each element's role and live widget values (current number, selected entry, checked state). The released model is unaffected.
+- **Hidden GUI, with guard rails.** Every FreeCAD runs hidden (`open -g -j` on macOS, `xvfb-run` elsewhere) under a watchdog that kills it above a memory cap or time limit, and when the launcher exits (`ui/launch.py`).
+
+```bash
+python scripts/smoke_ui.py --n 2                       # teacher episodes through the real UI (all pass: 30/30, clean + noisy)
+python -m freecad_s1.ui.datagen --out data/ui_train --episodes 400 800 1200 --workers 2
+python -m freecad_s1.train_sft --ui --data data/ui_train --out runs/ui ...
+```
+
+A UI step takes ~60 ms (vs ~3 ms headless), so UI data is slower to generate.
 
 ## Quick start
 

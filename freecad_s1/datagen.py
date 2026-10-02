@@ -35,12 +35,19 @@ from pathlib import Path
 NOISE_LEVELS = [0.0, 0.0, 0.1, 0.2, 0.3]
 
 
-def run_shard(out: Path, shard: int, episodes: list[int], seed: int) -> None:
-    from .runtime.episode import GoalBuildError, new_episode, score, step_budget
+def run_shard(out: Path, shard: int, episodes: list[int], seed: int, session=None, target_session=None,
+              budget_fn=None) -> dict:
+    """Generate one shard. `session` defaults to a HeadlessSession; the UI
+    data generator (freecad_s1/ui/datagen.py) passes a UiSession plus a
+    headless `target_session` for building target solids and its own step
+    budget."""
+    from .goals import sample_start
+    from .runtime.episode import GoalBuildError, new_episode, sample_feasible_goal, score, step_budget
     from .runtime.session import HeadlessSession
 
     rng = random.Random(seed * 1000 + shard)
-    session = HeadlessSession()
+    session = session or HeadlessSession()
+    budget_fn = budget_fn or step_budget
     path = out / f"shard{shard:03d}.jsonl.gz"
     n_records = n_eps = n_success = 0
     t0 = time.time()
@@ -48,12 +55,17 @@ def run_shard(out: Path, shard: int, episodes: list[int], seed: int) -> None:
         for level, count in enumerate(episodes, start=1):
             for k in range(count):
                 try:
-                    goal, start, target = new_episode(session, level, rng)
+                    if target_session is None:
+                        goal, start, target = new_episode(session, level, rng)
+                    else:
+                        goal, target = sample_feasible_goal(target_session, level, rng)
+                        start = sample_start(rng, level)
+                        session.reset(goal, start)
                 except GoalBuildError:
                     continue
                 ep = f"{seed}-{shard}-{level}-{k}"
                 noise = rng.choice(NOISE_LEVELS)
-                budget = step_budget(goal, start) * (3 if noise else 1)
+                budget = budget_fn(goal, start) * (3 if noise else 1)
                 fh.write(json.dumps({"ep": ep, "goal": goal.to_json()}) + "\n")
                 for t in range(budget):
                     state = session.state()
@@ -76,8 +88,10 @@ def run_shard(out: Path, shard: int, episodes: list[int], seed: int) -> None:
                 n_eps += 1
                 n_success += int(session.done and score(session, target)["match"])
     session.shutdown()
-    print(json.dumps({"shard": shard, "episodes": n_eps, "records": n_records,
-                      "expert_success": n_success / max(n_eps, 1), "seconds": round(time.time() - t0, 1)}))
+    summary = {"shard": shard, "episodes": n_eps, "records": n_records,
+               "expert_success": n_success / max(n_eps, 1), "seconds": round(time.time() - t0, 1)}
+    print(json.dumps(summary))
+    return summary
 
 
 def launch(args) -> None:
