@@ -159,14 +159,14 @@ class GuiProcess:
         return self.peak / (1 << 30)
 
 
-def self_guard(poll: float = 0.25) -> None:
+def self_guard(poll: float = 0.25, mem_limit_gb: float | None = None, timeout: float | None = None) -> None:
     """Call first thing in a script launched by `launch_gui_script` (inside
     FreeCAD): a daemon thread SIGKILLs this FreeCAD when its own footprint
     exceeds S1_MEM_LIMIT_GB, when S1_TIMEOUT passes, or when the launching
     Python process (S1_PARENT_PID) is gone. Second layer behind the
     launcher's watchdog, for when the launcher itself dies hard."""
-    limit = float(os.environ.get("S1_MEM_LIMIT_GB", DEFAULT_MEM_LIMIT_GB)) * (1 << 30)
-    deadline = time.time() + float(os.environ.get("S1_TIMEOUT", DEFAULT_TIMEOUT))
+    limit = float(mem_limit_gb or os.environ.get("S1_MEM_LIMIT_GB", DEFAULT_MEM_LIMIT_GB)) * (1 << 30)
+    deadline = time.time() + float(timeout or os.environ.get("S1_TIMEOUT", DEFAULT_TIMEOUT))
     parent = int(os.environ.get("S1_PARENT_PID", "0"))
     me = os.getpid()
 

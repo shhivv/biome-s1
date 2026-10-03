@@ -15,13 +15,16 @@ try:
     from freecad_s1.runtime.session import HeadlessSession
     from freecad_s1.schema import Goal, GoalFeature
     from freecad_s1.ui.session import UiSession
-    from freecad_s1.ui.spec import role
+    from freecad_s1.ui.spec import role, ui_step_budget
 
     F = GoalFeature
-    BOX = F("base_box", {"w": 40, "d": 30, "h": 10})
-    FIXED = [  # every feature kind at least once
-        [BOX, F("pocket_rect", {"w": 8, "d": 6, "x": 6, "y": 4, "depth": 3}), F("fillet_top", {"r": 1})],
-        [BOX, F("hole_std", {"r": 2, "x": 8, "y": 3}), F("chamfer_top", {"size": 1})],
+    # Every feature kind at least once, with values that differ from FreeCAD's
+    # dialog defaults (pad 10, fillet 1, chamfer 1, pocket 5, hole 6, ...) so
+    # every field is really typed.
+    BOX = F("base_box", {"w": 40, "d": 30, "h": 12})
+    FIXED = [
+        [BOX, F("pocket_rect", {"w": 8, "d": 6, "x": 6, "y": 4, "depth": 3}), F("fillet_top", {"r": 1.5})],
+        [BOX, F("hole_std", {"r": 2, "x": 8, "y": 3}), F("chamfer_top", {"size": 0.8})],
         [F("base_cyl", {"r": 30, "h": 10}), F("hole", {"r": 3, "x": 15, "y": 0}), F("polar_pattern", {"n": 6})],
         [BOX, F("hole", {"r": 2, "x": -12, "y": 0}), F("linear_pattern", {"n": 3, "length": 20})],
         [BOX, F("boss_cyl", {"r": 3, "x": 10, "y": 0, "h": 5}), F("mirror", {})],
@@ -37,6 +40,16 @@ try:
     for level in (1, 2, 3):
         goals += [(f"L{level}", sample_goal(level, rng)) for _ in range(n_sampled)]
 
+    # Undo stress: long goals that pass FreeCAD's default 20-step history, with
+    # Undo / Leave Sketch / Undo / Undo after every other sketch.
+    STRESS = [
+        [BOX, F("boss_box", {"w": 6, "d": 6, "x": -10, "y": 0, "h": 4}),
+         F("pocket_rect", {"w": 8, "d": 6, "x": 10, "y": 4, "depth": 3}), F("hole", {"r": 2, "x": 12, "y": -8}),
+         F("boss_cyl", {"r": 3, "x": -10, "y": 8, "h": 3})],
+        [F("base_cyl", {"r": 30, "h": 10}), F("hole", {"r": 3, "x": 15, "y": 0}), F("polar_pattern", {"n": 5}),
+         F("boss_cyl", {"r": 4, "x": 0, "y": 0, "h": 6}), F("chamfer_top", {"size": 0.6})],
+    ]
+    goals += [("stress", Goal(f, level=5, scale=40)) for f in STRESS]
     max_goals = int(os.environ.get("S1_MAX_GOALS", "0"))
     if max_goals:
         goals = goals[:max_goals]
@@ -52,11 +65,13 @@ try:
         except GoalBuildError:
             stats["infeasible"] += 1
             continue
-        for noise in (0.0, 0.25):
+        for noise in ((0.0,) if tag == "stress" else (0.0, 0.25)):
             start = sample_start(rng, 3) if tag != "fixed" else StartSpec()
             s.reset(goal, start)
-            budget = (step_budget(goal, start) + 6 * len(goal.features)) * (3 if noise else 1)
+            budget = ui_step_budget(goal, start) * (3 if noise else 1) + (20 if tag == "stress" else 0)
             trace = []
+            leaves = 0
+            forced = []  # undo-stress actions queued after a Leave Sketch
             for t in range(budget):
                 st = s.state()
                 valid = s.valid_actions(st)
@@ -70,7 +85,15 @@ try:
                     report["failures"].append({"kind": "expert_invalid", "bad": bad, "valid": valid, "trace": trace[-12:],
                                                "ui": st.ui})
                     break
-                a = rng.choice([x for x in valid if x != "Done"]) if rng.random() < noise else exp[0]
+                if forced:
+                    a = forced.pop(0)
+                    a = exp[0] if a == "expert" else a
+                else:
+                    a = rng.choice([x for x in valid if x != "Done"]) if rng.random() < noise else exp[0]
+                if tag == "stress" and a == "cmd:Sketcher_LeaveSketch" and not forced:
+                    leaves += 1
+                    if leaves % 2 == 0:
+                        forced = ["cmd:Std_Undo", "expert", "cmd:Std_Undo", "cmd:Std_Undo"]
                 trace_fh.write(f"{tag} noise={noise} t={t} {a}\n")
                 trace_fh.flush()
                 info = s.step(a)
@@ -81,7 +104,7 @@ try:
                     stats["errors"] += 1
                     stats["err:" + info["error"][:70]] += 1
                 tx = sum(e.n_tx for e in s.undo_stack if e.doc_tx)
-                if s.doc is not None and s.pending is None and tx != min(20, s.doc.UndoCount):
+                if s.doc is not None and s.pending is None and tx != s.doc.UndoCount:  # exact: UiSession lifts the cap
                     stats["undo_desync"] += 1
                     report["failures"].append({"kind": "undo_desync", "after": a, "UndoCount": s.doc.UndoCount,
                                                "UndoNames": list(s.doc.UndoNames), "tx": tx, "trace": trace[-12:]})

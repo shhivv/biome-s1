@@ -158,3 +158,22 @@ def test_ui_model_scores_dialog_elements_with_live_values():
     st.ui = ui2
     ex2 = make_example(st, goal, dialog_elements(ui2), **opts)
     assert (ex2.actions["ui"] != ex.actions["ui"]).any()
+
+
+def test_truncated_shard_keeps_complete_records(tmp_path):
+    import gzip
+    import json as _json
+
+    from freecad_s1.data import read_records
+
+    path = tmp_path / "shard000.jsonl.gz"
+    with gzip.open(path, "wt") as fh:
+        for i in range(200):
+            fh.write(_json.dumps({"ep": "e", "i": i, "pad": "x" * 200}) + "\n")
+            if i == 99:
+                fh.flush()  # what datagen does after each episode
+    data = path.read_bytes()
+    cut = tmp_path / "cut.jsonl.gz"
+    cut.write_bytes(data[: len(data) * 2 // 3])  # as if SIGKILLed mid-write
+    recs = list(read_records(str(cut)))
+    assert len(recs) >= 100 and [r["i"] for r in recs] == list(range(len(recs)))

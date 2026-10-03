@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import argparse
 import json
+import shutil
 import tempfile
 
 from freecad_s1.ui.launch import launch_gui_script
@@ -29,7 +30,9 @@ def main() -> None:
     args = ap.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "report.json"
-        proc = launch_gui_script(Path(__file__).with_name("smoke_ui.FCMacro"),
+        script = Path(tmp) / "smoke_ui.FCMacro"  # unique path: the watchdog finds (and kills) FreeCAD by it
+        shutil.copy(Path(__file__).with_name("smoke_ui.FCMacro"), script)
+        proc = launch_gui_script(script,
                                  {"S1_OUT": str(out), "S1_N": str(args.n), "S1_SEED": str(args.seed),
                                   "S1_MAX_GOALS": str(args.goals),
                                   **({"S1_TRACE": str(Path(args.trace).resolve())} if args.trace else {})},

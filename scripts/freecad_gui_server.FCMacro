@@ -4,5 +4,7 @@ import os, sys
 repo = os.environ["FREECAD_S1_REPO"]
 if repo not in sys.path:
     sys.path.insert(0, repo)
+from freecad_s1.ui.launch import self_guard
+self_guard(mem_limit_gb=4, timeout=24 * 3600)  # visible demo: memory cap, no parent check
 from freecad_s1.runtime.gui_server import start
 start()

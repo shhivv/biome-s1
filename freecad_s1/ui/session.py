@@ -42,10 +42,15 @@ from ..actions import PROFILE_FEATURES, SOLID_FEATURE_TYPES
 from ..expert import Meta, ObjMeta, progress
 from ..goals import StartSpec
 from ..runtime.gui_session import GuiSession
-from ..runtime.session import UNDO_LIMIT, ActionError, UndoEntry
+from ..runtime.session import ActionError, UndoEntry
 from ..schema import Goal, State
 from . import spec as S
 from .teacher import command_elements, dialog_elements, dialog_expert, fields_on_plan
+
+# FreeCAD keeps 20 undo steps by default. The GUI reads this preference when
+# it creates a document; with the history out of reach, transaction counts
+# stay exact (at the cap, a GUI-side extra transaction cannot be told apart).
+GUI_UNDO_LIMIT = 2000
 
 _NUMBER = re.compile(r"-?\d+(?:[.,]\d+)?")
 MAX_COUNT = 100  # pattern occurrences above this are refused outright
@@ -115,7 +120,10 @@ class Pending:
 
 
 class UiSession(GuiSession):
+    undo_limit = GUI_UNDO_LIMIT
+
     def __init__(self) -> None:
+        App.ParamGet("User parameter:BaseApp/Preferences/Document").SetInt("MaxUndoSize", GUI_UNDO_LIMIT)
         super().__init__()
         self.pending: Pending | None = None
         self.messages: list[str] = []
@@ -176,8 +184,10 @@ class UiSession(GuiSession):
             return
         tx = sum(e.n_tx for e in self.undo_stack if e.doc_tx)
         extra = self.doc.UndoCount - tx
-        if extra <= 0 or self.doc.UndoCount >= UNDO_LIMIT:  # FreeCAD caps its history; counts stop being exact
+        if extra <= 0:
             return
+        if self.doc.UndoCount >= self.undo_limit:
+            raise RuntimeError(f"undo history reached {self.undo_limit}; transaction counts are no longer exact")
         top = self.undo_stack[-1]
         top.n_tx = (top.n_tx if top.doc_tx else 0) + extra
         top.doc_tx = True
@@ -331,6 +341,16 @@ class UiSession(GuiSession):
         pending.feature = next((o.Name for o in self.doc.Objects
                                 if o.Name not in names_before and o.TypeId in SOLID_FEATURE_TYPES), None)
         self.pending = pending
+        # Fail loudly on a dialog that is not the one the spec describes (e.g.
+        # Pad's sketch picker when two unused sketches exist): a field that is
+        # silently missing would let OK commit FreeCAD's default.
+        missing = [fl.name for fl in S.DIALOG_FIELDS.get(command, []) if self._widget(fl.name) is None]
+        if missing or pending.feature is None:
+            try:
+                self._reject({})
+            except ActionError:
+                self._close_dialog()
+            raise ActionError(f"{command} opened an unexpected dialog (feature {pending.feature}, missing {missing})")
         info["changed"] = True
 
     def _edit_field(self, element: str) -> None:

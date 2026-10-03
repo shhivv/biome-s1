@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import json
 import pickle
+import zlib
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -71,6 +72,22 @@ class Dataset:
         return self.subset(np.flatnonzero(~val)), self.subset(np.flatnonzero(val))
 
 
+def read_records(path: str):
+    """Records of one gzip JSONL shard. A shard whose writer was killed
+    (the UI data generator's watchdog uses SIGKILL) ends mid-stream: keep
+    everything up to the last complete line instead of failing the load."""
+    try:
+        with gzip.open(path, "rt") as fh:
+            for line in fh:
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    print(f"warning: {path}: truncated record, stopping there")
+                    return
+    except (EOFError, gzip.BadGzipFile, zlib.error) as exc:
+        print(f"warning: {path}: truncated shard ({type(exc).__name__}), using the records before the cut")
+
+
 def _load_shard(args: tuple[str, dict]) -> Dataset:
     path, opts = args
     tag = "".join(f".{k}" for k, v in sorted(opts.items()) if v)
@@ -80,15 +97,13 @@ def _load_shard(args: tuple[str, dict]) -> Dataset:
             return pickle.load(fh)
     ds = Dataset()
     goals: dict[str, Goal] = {}
-    with gzip.open(path, "rt") as fh:
-        for line in fh:
-            rec = json.loads(line)
-            if "goal" in rec:
-                goals[rec["ep"]] = Goal.from_json(rec["goal"])
-                continue
-            ex = make_example(State.from_json(rec["state"]), goals[rec["ep"]], rec["actions"], rec["acceptable"],
-                              rec.get("progress"), **opts)
-            ds.add(ex, rec["ep"], rec["level"], rec["noise"], rec["acceptable"])
+    for rec in read_records(path):
+        if "goal" in rec:
+            goals[rec["ep"]] = Goal.from_json(rec["goal"])
+            continue
+        ex = make_example(State.from_json(rec["state"]), goals[rec["ep"]], rec["actions"], rec["acceptable"],
+                          rec.get("progress"), **opts)
+        ds.add(ex, rec["ep"], rec["level"], rec["noise"], rec["acceptable"])
     with open(cache, "wb") as fh:
         pickle.dump(ds, fh, protocol=pickle.HIGHEST_PROTOCOL)
     return ds

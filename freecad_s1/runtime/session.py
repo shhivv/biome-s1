@@ -181,6 +181,7 @@ def iou(a, b) -> float:
 
 class HeadlessSession:
     _counter = 0
+    undo_limit = UNDO_LIMIT  # FreeCAD's history length for this session's documents
 
     def __init__(self) -> None:
         self.doc = None
@@ -359,7 +360,7 @@ class HeadlessSession:
 
     def _push_undo(self, entry: UndoEntry) -> None:
         self.undo_stack.append(entry)
-        while sum(e.n_tx for e in self.undo_stack if e.doc_tx) > UNDO_LIMIT:
+        while sum(e.n_tx for e in self.undo_stack if e.doc_tx) > self.undo_limit:
             while not self.undo_stack.pop(0).doc_tx:
                 pass
 

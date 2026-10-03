@@ -20,7 +20,8 @@ model chooses them itself.
 Each task dialog exposes only the fields listed in `DIALOG_FIELDS`, and every
 listed field has a target, so the teacher can always say whether the dialog
 is filled in as the plan requires. Field names are the widgets'
-`objectName`s in FreeCAD 1.1 (see scripts/probe_ui_dialogs.py).
+`objectName`s in FreeCAD 1.1 (dump them with scripts/probe_ui_dialogs.py);
+`UiSession` refuses a dialog in which any listed field is missing.
 
 Pure stdlib: no FreeCAD import.
 """

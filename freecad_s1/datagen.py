@@ -87,6 +87,7 @@ def run_shard(out: Path, shard: int, episodes: list[int], seed: int, session=Non
                         break
                 n_eps += 1
                 n_success += int(session.done and score(session, target)["match"])
+                fh.flush()  # sync-flush per episode: a killed worker leaves a readable shard
     session.shutdown()
     summary = {"shard": shard, "episodes": n_eps, "records": n_records,
                "expert_success": n_success / max(n_eps, 1), "seconds": round(time.time() - t0, 1)}
