@@ -41,7 +41,10 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--mem-gb", type=float, default=3.0, help="kill a worker above this memory footprint")
     ap.add_argument("--timeout", type=float, default=4 * 3600, help="kill a worker after this many seconds")
-    ap.add_argument("--max-restarts", type=int, default=20, help="restarts per worker after a FreeCAD crash")
+    ap.add_argument("--max-restarts", type=int, default=1000,
+                    help="restarts per worker (FreeCAD crashes ~1 per 100 episodes; memory-cap kills recycle workers)")
+    ap.add_argument("--shard-offset", type=int, default=0,
+                    help="added to shard ids, so a continuation run into the same --out never overwrites a shard")
     args = ap.parse_args()
 
     out = Path(args.out).resolve()
@@ -56,9 +59,9 @@ def main() -> None:
         # FreeCAD occasionally segfaults inside its own dialogs; a worker that
         # dies is restarted with a fresh shard id (and so fresh episodes) for
         # the episodes it still owes. Partial shards stay usable.
-        shard = w * 100 + attempts[w]
+        shard = args.shard_offset + w * 10000 + attempts[w]
         attempts[w] += 1
-        script = out / f".shard{shard:03d}.FCMacro"  # unique path: the watchdog's handle on the worker
+        script = out / f".shard{shard:05d}.FCMacro"  # unique path: the watchdog's handle on the worker
         script.write_text(SHARD_SCRIPT.read_text())
         env = {"S1_OUT_DIR": str(out), "S1_SHARD": str(shard), "S1_SEED": str(args.seed),
                "S1_EPISODES": " ".join(map(str, remaining[w]))}
