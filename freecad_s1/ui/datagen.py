@@ -11,6 +11,11 @@ datagen format (gzip JSONL; `actions` / `acceptable` are UI element ids and
 `state.ui` holds the open dialog), so freecad_s1.data loads it as is; train
 with `train_sft --ui`.
 
+FreeCAD occasionally segfaults inside a task dialog (seen once in ~150
+pilot episodes, accepting a Pocket after switching its mode back and forth);
+the launcher restarts a crashed worker for the episodes it still owes, and
+partial shards stay loadable.
+
 A UI step costs ~60 ms against ~3 ms headless, and every worker is a full
 GUI (~1 GB), so keep --workers small.
 """
@@ -19,10 +24,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from ..runtime.fcenv import REPO_ROOT
-from .launch import launch_gui_script
+from .launch import GuiProcess, launch_gui_script
 
 SHARD_SCRIPT = REPO_ROOT / "scripts" / "ui_shard.FCMacro"
 
@@ -35,33 +41,72 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--mem-gb", type=float, default=3.0, help="kill a worker above this memory footprint")
     ap.add_argument("--timeout", type=float, default=4 * 3600, help="kill a worker after this many seconds")
+    ap.add_argument("--max-restarts", type=int, default=20, help="restarts per worker after a FreeCAD crash")
     args = ap.parse_args()
 
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    per_worker = [[c // args.workers + (1 if w < c % args.workers else 0) for c in args.episodes]
-                  for w in range(args.workers)]
-    # One script copy per worker: the watchdog finds a worker by its script path.
-    procs = []
-    for w in range(args.workers):
-        script = out / f".shard{w:03d}.FCMacro"
-        script.write_text(SHARD_SCRIPT.read_text())
-        env = {"S1_OUT_DIR": str(out), "S1_SHARD": str(w), "S1_SEED": str(args.seed),
-               "S1_EPISODES": " ".join(map(str, per_worker[w]))}
-        procs.append((w, launch_gui_script(script, env, log=out / f"shard{w:03d}.log",
-                                           mem_limit_gb=args.mem_gb, timeout=args.timeout)))
+    remaining = [[c // args.workers + (1 if w < c % args.workers else 0) for c in args.episodes]
+                 for w in range(args.workers)]
+    attempts = [0] * args.workers
+    running: dict[int, tuple[int, GuiProcess]] = {}
     failed = False
-    for w, proc in procs:
-        proc.wait()
-        summary_path = out / f"shard{w:03d}.summary.json"
-        summary = json.loads(summary_path.read_text()) if summary_path.exists() else {"shard": w, "error": "no summary"}
-        summary["peak_gb"] = round(proc.peak_gb, 2)
-        if proc.killed:
-            summary["killed"] = proc.killed
-        failed |= "error" in summary or "killed" in summary
-        print(json.dumps(summary))
+
+    def start(w: int) -> None:
+        # FreeCAD occasionally segfaults inside its own dialogs; a worker that
+        # dies is restarted with a fresh shard id (and so fresh episodes) for
+        # the episodes it still owes. Partial shards stay usable.
+        shard = w * 100 + attempts[w]
+        attempts[w] += 1
+        script = out / f".shard{shard:03d}.FCMacro"  # unique path: the watchdog's handle on the worker
+        script.write_text(SHARD_SCRIPT.read_text())
+        env = {"S1_OUT_DIR": str(out), "S1_SHARD": str(shard), "S1_SEED": str(args.seed),
+               "S1_EPISODES": " ".join(map(str, remaining[w]))}
+        running[w] = (shard, launch_gui_script(script, env, log=out / f"shard{shard:03d}.log",
+                                               mem_limit_gb=args.mem_gb, timeout=args.timeout))
+
+    for w in range(args.workers):
+        start(w)
+    while running:
+        time.sleep(2)
+        for w, (shard, proc) in list(running.items()):
+            if proc.proc.poll() is None:
+                continue
+            proc.wait()
+            del running[w]
+            summary_path = out / f"shard{shard:03d}.summary.json"
+            summary = json.loads(summary_path.read_text()) if summary_path.exists() else {"shard": shard}
+            summary["peak_gb"] = round(proc.peak_gb, 2)
+            if proc.killed:
+                summary["killed"] = proc.killed
+            done = "episodes" in summary and "error" not in summary and not proc.killed
+            if not done:
+                started = episodes_started(out / f"shard{shard:03d}.jsonl.gz")
+                remaining[w] = [max(0, r - started.get(level, 0)) for level, r in enumerate(remaining[w], start=1)]
+                summary.update(crashed=True, episodes_started=started, still_owed=remaining[w])
+            print(json.dumps(summary), flush=True)
+            if not done and sum(remaining[w]):
+                if attempts[w] >= args.max_restarts + 1:
+                    failed = True
+                    print(json.dumps({"worker": w, "gave_up": True, "owed": remaining[w]}), flush=True)
+                else:
+                    start(w)
     if failed:
         raise SystemExit(1)
+
+
+def episodes_started(path: Path) -> dict[int, int]:
+    """Episodes per level that a (possibly truncated) shard began."""
+    from ..data import read_records
+
+    counts: dict[int, int] = {}
+    if not path.exists():
+        return counts
+    for rec in read_records(str(path)):
+        if "goal" in rec:
+            level = int(rec["goal"].get("level", 1))
+            counts[level] = counts.get(level, 0) + 1
+    return counts
 
 
 if __name__ == "__main__":
