@@ -109,10 +109,13 @@ def run_episodes(policy: Policy, vec: VecEnv, specs: list[dict], sample: bool = 
             e = eps[i]
             e.steps += 1
             e.history.append(a)
-            e.state, e.actions = State.from_json(r["state"]), r["actions"]
+            if r["state"] is not None:
+                e.state, e.actions = State.from_json(r["state"]), r["actions"]
             e.progress = r.get("progress", -1)
             prev_expert, e.expert = e.expert, r["expert"]
-            if r["info"]["done"]:
+            if r["info"].get("crashed"):  # FreeCAD died (UI envs); counted as a failure, reported separately
+                e.outcome = "crashed"
+            elif r["info"]["done"]:
                 e.done = True
                 e.outcome = "done_clean" if prev_expert == ["Done"] else "done"
             elif not e.expert:
