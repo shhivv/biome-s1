@@ -103,6 +103,8 @@ def main() -> None:
     ap.add_argument("--aux-coef", type=float, default=0.5, help="weight of the progress-pointer loss")
     ap.add_argument("--ui-recent-fields", action="store_true",
                     help="UI models: recent dialog edits carry which field they touched")
+    ap.add_argument("--ui-pending-feature", action="store_true",
+                    help="UI models: a feature whose dialog is open does not count as built")
     ap.add_argument("--ui", action="store_true",
                     help="UI-level model on data from freecad_s1.ui.datagen (DAgger runs hidden FreeCAD GUIs)")
     ap.add_argument("--max-examples", type=int, default=0, help="subsample training set (0 = all)")
@@ -132,7 +134,7 @@ def main() -> None:
 
     t0 = time.time()
     ap_cfg = S1Config(invariant_numerics=args.invariant_numerics, modular=args.modular, ui=args.ui,
-                      ui_recent_fields=args.ui_recent_fields)
+                      ui_recent_fields=args.ui_recent_fields, ui_pending_feature=args.ui_pending_feature)
     full = load_dataset(args.data, **ap_cfg.feature_opts())
     train, val = full.split()
     for path in args.extra_data:
@@ -148,7 +150,7 @@ def main() -> None:
                    pos_mode=args.pos_mode, ordinal=args.ordinal, progress_head=args.progress_head,
                    invariant_numerics=args.invariant_numerics, modular=args.modular, pointer=args.pointer,
                    index_eval=args.index_eval, type_dropout=args.type_dropout, ui=args.ui,
-                   ui_recent_fields=args.ui_recent_fields)
+                   ui_recent_fields=args.ui_recent_fields, ui_pending_feature=args.ui_pending_feature)
     model = S1Model(cfg)
     if args.init:
         state = torch.load(args.init, map_location="cpu", weights_only=True)["state_dict"]

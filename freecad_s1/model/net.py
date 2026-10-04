@@ -99,6 +99,7 @@ class S1Config:
     # role and live widget values; recent tokens carry the element role.
     ui: bool = False
     ui_recent_fields: bool = False  # recent dialog edits carry which field they touched
+    ui_pending_feature: bool = False  # a feature whose dialog is open does not count as built (ordinals)
 
     def feature_opts(self) -> dict:
         """Featurization options this model was trained with."""
@@ -107,6 +108,8 @@ class S1Config:
             opts["ui"] = True
         if self.ui_recent_fields:
             opts["ui_recent"] = True
+        if self.ui_pending_feature:
+            opts["ui_pending"] = True
         return opts
 
     @property

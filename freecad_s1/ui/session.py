@@ -262,7 +262,7 @@ class UiSession(GuiSession):
     def state(self) -> State:
         st = super().state()
         if self.pending is not None:
-            st.ui = {"dialog": self.pending.command, "fields": self.ui_fields()}
+            st.ui = {"dialog": self.pending.command, "feature": self.pending.feature, "fields": self.ui_fields()}
         return st
 
     def valid_actions(self, state: State | None = None) -> list[str]:

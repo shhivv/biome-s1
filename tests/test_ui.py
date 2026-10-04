@@ -177,3 +177,25 @@ def test_truncated_shard_keeps_complete_records(tmp_path):
     cut.write_bytes(data[: len(data) * 2 // 3])  # as if SIGKILLed mid-write
     recs = list(read_records(str(cut)))
     assert len(recs) >= 100 and [r["i"] for r in recs] == list(range(len(recs)))
+
+
+def test_feature_with_open_dialog_does_not_count_as_built():
+    import random
+
+    from freecad_s1.goals import sample_goal
+    from freecad_s1.model.featurize import SEG_NODE, encode_state
+    from freecad_s1.schema import Node, ShapeInfo, State
+
+    goal = sample_goal(2, random.Random(0))
+    tree = [Node("Body", "PartDesign::Body"), Node("Sketch", "Sketcher::SketchObject", parent=0, depth=1),
+            Node("Pad", "PartDesign::Pad", parent=0, depth=1), Node("Sketch001", "Sketcher::SketchObject", parent=0, depth=1),
+            Node("Pocket", "PartDesign::Pocket", parent=0, depth=1)]
+    st = State(doc_open=True, workbench="PartDesignWorkbench", has_body=True, tree=tree, shape=ShapeInfo(),
+               ui={"dialog": "PartDesign_Pocket", "feature": "Pocket", "fields": {}})
+    def node_ords(**kw):
+        t = encode_state(st, goal, ui=True, **kw)
+        return [int(o) for s_, o in zip(t.seg, t.ord) if s_ == SEG_NODE]
+    assert node_ords() == [0, 1, 1, 2, 2]  # without the fix the open Pocket already matches intent 2
+    assert node_ords(ui_pending=True) == [0, 1, 1, 2, 0]
+    st.ui = None  # dialog closed: the Pocket is built
+    assert node_ords(ui_pending=True) == [0, 1, 1, 2, 2]

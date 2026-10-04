@@ -85,8 +85,26 @@ def _clip(x: float, lim: float = 8.0) -> float:
     return float(max(-lim, min(lim, x)))
 
 
+def _pending_feature(state: State) -> int | None:
+    """Tree index of the feature whose task dialog is open. FreeCAD creates
+    the feature when the dialog opens, so without this it would already count
+    as built (and the active intent would move on while its dialog is being
+    filled in)."""
+    if not (state.ui and state.ui.get("dialog")):
+        return None
+    name = state.ui.get("feature")
+    for j, node in enumerate(state.tree):
+        if name is not None and node.name == name:
+            return j
+    if name is None:  # older records: the newest solid feature is the pending one
+        for j in range(len(state.tree) - 1, -1, -1):
+            if state.tree[j].type in SOLID_FEATURE_TYPES:
+                return j
+    return None
+
+
 def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bool = False, ui: bool = False,
-                 ui_recent: bool = False) -> Tokens:
+                 ui_recent: bool = False, ui_pending: bool = False) -> Tokens:
     """`invariant` (H5): drop numeric features whose magnitude grows with the
     length of the build (tree size, number of intents, intents remaining) and
     express face/edge counts relative to the target, so longer goals do not
@@ -129,8 +147,11 @@ def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bo
     # from observable state only.
     node_ords = []
     n_solid = 0
-    for node in state.tree[:MAX_NODES]:
-        if node.type in SOLID_FEATURE_TYPES:
+    pending = _pending_feature(state) if ui_pending else None
+    for j, node in enumerate(state.tree[:MAX_NODES]):
+        if j == pending:  # its task dialog is still open: not built yet, matches no intent
+            node_ords.append(0)
+        elif node.type in SOLID_FEATURE_TYPES:
             node_ords.append(min(n_solid + 1, MAX_ORD - 1))
             n_solid += 1
         elif node.type == "Sketcher::SketchObject":
@@ -284,10 +305,10 @@ class Example:
 
 def make_example(state: State, goal: Goal, actions: list[str], acceptable: list[str] | None = None,
                  progress: int | None = None, invariant: bool = False, sentinel: bool = False,
-                 ui: bool = False, ui_recent: bool = False) -> Example:
+                 ui: bool = False, ui_recent: bool = False, ui_pending: bool = False) -> Example:
     acc = set(acceptable or [])
     scale = goal.scale if goal.scale > 0 else 1.0
-    return Example(encode_state(state, goal, invariant, sentinel, ui, ui_recent),
+    return Example(encode_state(state, goal, invariant, sentinel, ui, ui_recent, ui_pending),
                    encode_actions(actions, ui, state.ui, scale),
                    np.array([a in acc for a in actions], dtype=bool), -1 if progress is None else int(progress))
 
