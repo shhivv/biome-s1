@@ -116,6 +116,8 @@ def online_metrics(model: S1Model, device: torch.device, suites=("iid", "comp", 
     finally:
         vec.close()
     report = summarize(results)
+    if hasattr(vec, "recovered"):  # UI envs: FreeCAD crashes, and how many replay recovered
+        report["freecad_crashes"] = {"raw": vec.crashes, "recovered": vec.recovered}
     report["failures"] = [{"suite_level": r.level, "features": r.features, "outcome": r.outcome, "iou": r.iou,
                            "steps": r.steps, "history": r.history} for r in results if not r.success]
     return report

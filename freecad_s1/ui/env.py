@@ -75,18 +75,28 @@ class UiEnv:
 class UiVecEnv(VecEnv):
     """N hidden FreeCAD GUIs stepped in lockstep (ports base_port..+n-1).
 
-    FreeCAD occasionally segfaults inside a task dialog. A slot whose FreeCAD
-    dies is restarted; its episode ends with `info.crashed` (rollout.py
-    reports it as outcome "crashed") and scores 0, so one crash never takes
-    down a whole evaluation or DAgger round."""
+    FreeCAD segfaults now and then inside its GUI (~1 in 30 UI episodes,
+    more on long goals). With `recover` (default), a slot whose FreeCAD dies
+    is restarted, the episode is replayed from its reset spec and action
+    history (episodes are deterministic), and the failed request is retried,
+    like recovering from FreeCAD's autosave. `crashes` counts raw crashes and
+    `recovered` the ones replay got past. A slot that still fails ends its
+    episode with `info.crashed` (rollout.py: outcome "crashed", score 0)."""
 
-    def __init__(self, n: int, base_port: int = 8800, mem_limit_gb: float = DEFAULT_MEM_LIMIT_GB) -> None:
+    def __init__(self, n: int, base_port: int = 8800, mem_limit_gb: float = DEFAULT_MEM_LIMIT_GB,
+                 recover: bool = True, max_recoveries: int = 3) -> None:
         self.base_port = base_port
         self.mem_limit_gb = mem_limit_gb
+        self.recover = recover
+        self.max_recoveries = max_recoveries
         self.envs = []
         self.last: list[dict | None] = [None] * n
+        self.specs: list[dict | None] = [None] * n
+        self.history: list[list[tuple[str, bool]]] = [[] for _ in range(n)]
+        self.recoveries = [0] * n
         self.crashed: set[int] = set()
         self.crashes = 0
+        self.recovered = 0
         try:
             for i in range(n):
                 self.envs.append(UiEnv(base_port + i, mem_limit_gb=mem_limit_gb))
@@ -95,13 +105,38 @@ class UiVecEnv(VecEnv):
             raise
 
     def _restart(self, i: int) -> None:
-        self.crashes += 1
-        self.crashed.add(i)
         try:
             self.envs[i].close()
         except Exception:
             pass
         self.envs[i] = UiEnv(self.base_port + i, mem_limit_gb=self.mem_limit_gb)
+
+    def _replay(self, i: int) -> bool:
+        """Restart slot i and replay its episode so far. False if that fails."""
+        self.crashes += 1
+        if not self.recover or self.specs[i] is None or self.recoveries[i] >= self.max_recoveries:
+            return False
+        self.recoveries[i] += 1
+        try:
+            self._restart(i)
+            r = self.envs[i].call({"op": "reset", **self.specs[i]})
+            for action, reward in self.history[i]:
+                r = self.envs[i].call({"op": "step", "action": action, "reward": reward})
+            self.last[i] = r
+            return True
+        except (WorkerError, OSError, ValueError):
+            return False
+
+    def _fail(self, i: int) -> dict:
+        self.crashed.add(i)
+        try:
+            self._restart(i)
+        except Exception:
+            pass
+        prev = self.last[i] or {}
+        return {"ok": True, "info": {"changed": False, "error": "FreeCAD crashed", "done": True, "crashed": True},
+                "state": prev.get("state"), "actions": prev.get("actions", []), "expert": [],
+                "progress": prev.get("progress", -1)}
 
     def reset(self, specs: list[dict]):
         eps = []
@@ -109,13 +144,15 @@ class UiVecEnv(VecEnv):
             for attempt in range(3):
                 try:
                     if attempt:
+                        self.crashes += 1
                         self._restart(i)
                     r = self.envs[i].call({"op": "reset", **spec})
                     break
-                except WorkerError:
+                except (WorkerError, OSError, ValueError):
                     if attempt == 2:
                         raise
             self.crashed.discard(i)
+            self.specs[i], self.history[i], self.recoveries[i] = dict(spec), [], 0
             self.last[i] = r
             goal = Goal.from_json(r["goal"])
             eps.append(Episode(goal, r["budget"], spec.get("level", goal.level), State.from_json(r["state"]),
@@ -129,16 +166,22 @@ class UiVecEnv(VecEnv):
             except OSError:
                 pass  # picked up as a failed recv below
         out = []
-        for i in idx:
+        for i, a in zip(idx, actions):
             try:
                 r = self.envs[i].recv()
-                self.last[i] = r
             except (WorkerError, OSError, ValueError):
-                self._restart(i)
-                prev = self.last[i] or {}
-                r = {"ok": True, "info": {"changed": False, "error": "FreeCAD crashed", "done": True, "crashed": True},
-                     "state": prev.get("state"), "actions": prev.get("actions", []), "expert": [],
-                     "progress": prev.get("progress", -1)}
+                r = None
+                while r is None and self._replay(i):
+                    try:
+                        r = self.envs[i].call({"op": "step", "action": a, "reward": reward})
+                        self.recovered += 1
+                    except (WorkerError, OSError, ValueError):
+                        r = None
+                if r is None:
+                    out.append(self._fail(i))
+                    continue
+            self.history[i].append((a, reward))
+            self.last[i] = r
             out.append(r)
         return out
 
@@ -150,7 +193,17 @@ class UiVecEnv(VecEnv):
                 continue
             try:
                 out.append(self.envs[i].call({"op": "score"}))
+                continue
             except (WorkerError, OSError, ValueError):
-                self._restart(i)
-                out.append({"ok": True, "iou": 0.0, "match": False, "crashed": True})
+                pass
+            r = None
+            while r is None and self._replay(i):
+                try:
+                    r = self.envs[i].call({"op": "score"})
+                    self.recovered += 1
+                except (WorkerError, OSError, ValueError):
+                    r = None
+            out.append(r if r is not None else {"ok": True, "iou": 0.0, "match": False, "crashed": True})
+            if r is None:
+                self.crashed.add(i)
         return out
