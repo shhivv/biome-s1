@@ -46,7 +46,7 @@ MAX_SEL = 4
 MAX_GOAL = 24
 MAX_WORDS = 8
 ACT_VEC_DIM = 6
-UI_VEC_DIM = 6
+UI_VEC_DIM = 8  # models built without ui_param_match use the first 6
 UI_ROLES = UIS.ROLES
 _ROLE = {r: i for i, r in enumerate(UI_ROLES)}
 UI_FIELDS = sorted({f.name for fields in UIS.DIALOG_FIELDS.values() for f in fields})  # one-hot in recent tokens
@@ -252,9 +252,12 @@ def encode_action(action_id: str, ui: bool = False) -> tuple[int, int, int, list
     return out
 
 
-def ui_vector(element: str, ui_state: dict | None, scale: float) -> list[float]:
+def ui_vector(element: str, ui_state: dict | None, scale: float, param_match: bool = False) -> list[float]:
     """Live widget values for a dialog element: [mm value / scale, degrees /
-    360, count / 10, checked, current option, is a dialog widget]."""
+    360, count / 10, checked, current option, is a dialog widget] and, with
+    `param_match`, for numeric fields [holds the parameter stage's value, the
+    parameter stage has a value]. The parameter stage supplies every number
+    the model types; this tells the model whether typing is needed."""
     vec = [0.0] * UI_VEC_DIM
     role = UIS.role(element)
     if role not in ("set", "opt", "toggle", "click"):
@@ -264,6 +267,9 @@ def ui_vector(element: str, ui_state: dict | None, scale: float) -> list[float]:
     if fld is None:
         return vec
     value = fld.get("value")
+    if role == "set" and param_match and fld.get("target") is not None:
+        vec[7] = 1.0
+        vec[6] = float(UIS.value_matches(fld["target"], value))
     if role == "set" and isinstance(value, (int, float)):
         unit = fld.get("unit")
         if unit == "deg":
@@ -280,7 +286,7 @@ def ui_vector(element: str, ui_state: dict | None, scale: float) -> list[float]:
 
 
 def encode_actions(actions: list[str], ui: bool = False, ui_state: dict | None = None,
-                   scale: float = 1.0) -> dict[str, np.ndarray]:
+                   scale: float = 1.0, param_match: bool = False) -> dict[str, np.ndarray]:
     enc = [encode_action(a, ui) for a in actions]
     out = {
         "id": np.array([e[0] for e in enc], np.int16),
@@ -291,7 +297,7 @@ def encode_actions(actions: list[str], ui: bool = False, ui_state: dict | None =
     }
     if ui:
         out["role"] = np.array([e[5] for e in enc], np.int8)
-        out["ui"] = np.array([ui_vector(a, ui_state, scale) for a in actions], np.float32).reshape(len(enc), UI_VEC_DIM)
+        out["ui"] = np.array([ui_vector(a, ui_state, scale, param_match) for a in actions], np.float32).reshape(len(enc), UI_VEC_DIM)
     return out
 
 
@@ -305,11 +311,12 @@ class Example:
 
 def make_example(state: State, goal: Goal, actions: list[str], acceptable: list[str] | None = None,
                  progress: int | None = None, invariant: bool = False, sentinel: bool = False,
-                 ui: bool = False, ui_recent: bool = False, ui_pending: bool = False) -> Example:
+                 ui: bool = False, ui_recent: bool = False, ui_pending: bool = False,
+                 ui_param: bool = False) -> Example:
     acc = set(acceptable or [])
     scale = goal.scale if goal.scale > 0 else 1.0
     return Example(encode_state(state, goal, invariant, sentinel, ui, ui_recent, ui_pending),
-                   encode_actions(actions, ui, state.ui, scale),
+                   encode_actions(actions, ui, state.ui, scale, ui_param),
                    np.array([a in acc for a in actions], dtype=bool), -1 if progress is None else int(progress))
 
 

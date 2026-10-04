@@ -103,8 +103,10 @@ def _load_shard(args: tuple[str, dict]) -> Dataset:
             continue
         if not set(rec["acceptable"]) & set(rec["actions"]):
             continue  # no correct option offered (rare GUI corner case): no learning signal
-        ex = make_example(State.from_json(rec["state"]), goals[rec["ep"]], rec["actions"], rec["acceptable"],
-                          rec.get("progress"), **opts)
+        state = State.from_json(rec["state"])
+        if opts.get("ui_param"):
+            UIS.annotate_targets(state.ui, goals[rec["ep"]], rec.get("progress"))
+        ex = make_example(state, goals[rec["ep"]], rec["actions"], rec["acceptable"], rec.get("progress"), **opts)
         ds.add(ex, rec["ep"], rec["level"], rec["noise"], rec["acceptable"])
     with open(cache, "wb") as fh:
         pickle.dump(ds, fh, protocol=pickle.HIGHEST_PROTOCOL)

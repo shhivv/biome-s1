@@ -199,3 +199,15 @@ def test_feature_with_open_dialog_does_not_count_as_built():
     assert node_ords(ui_pending=True) == [0, 1, 1, 2, 0]
     st.ui = None  # dialog closed: the Pocket is built
     assert node_ords(ui_pending=True) == [0, 1, 1, 2, 2]
+
+
+def test_param_match_flags_numeric_fields_against_parameter_stage():
+    from freecad_s1.model.featurize import ui_vector
+
+    ui = {"dialog": "PartDesign_LinearPattern", "fields": {
+        "spinOccurrences": {"kind": "number", "unit": "count", "value": 2.0, "target": 3},
+        "spinExtent": {"kind": "number", "unit": "mm", "value": 20.0, "target": 20.0}}}
+    occ = ui_vector("set:spinOccurrences", ui, 40.0, param_match=True)
+    ext = ui_vector("set:spinExtent", ui, 40.0, param_match=True)
+    assert occ[6:] == [0.0, 1.0] and ext[6:] == [1.0, 1.0]
+    assert ui_vector("set:spinOccurrences", ui, 40.0)[6:] == [0.0, 0.0]  # off unless the model uses it

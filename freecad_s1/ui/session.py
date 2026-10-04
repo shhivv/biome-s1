@@ -249,6 +249,7 @@ class UiSession(GuiSession):
             if fl.kind == "number":
                 d["value"] = self._read_number(w)
                 d["unit"] = fl.unit
+                d["target"] = self.pending.targets.get(fl.name)  # what the parameter stage would type (None: any)
             elif fl.kind == "choice":
                 d["value"] = w.currentText()
                 d["options"] = [w.itemText(i) for i in range(w.count())]

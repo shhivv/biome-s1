@@ -100,6 +100,7 @@ class S1Config:
     ui: bool = False
     ui_recent_fields: bool = False  # recent dialog edits carry which field they touched
     ui_pending_feature: bool = False  # a feature whose dialog is open does not count as built (ordinals)
+    ui_param_match: bool = False  # numeric options say whether they hold the parameter stage's value
 
     def feature_opts(self) -> dict:
         """Featurization options this model was trained with."""
@@ -110,6 +111,8 @@ class S1Config:
             opts["ui_recent"] = True
         if self.ui_pending_feature:
             opts["ui_pending"] = True
+        if self.ui_param_match:
+            opts["ui_param"] = True
         return opts
 
     @property
@@ -204,7 +207,7 @@ class ActionEncoder(nn.Module):
         self.vec = nn.Linear(ACT_VEC_DIM, d)
         if cfg.ui:
             self.role = nn.Embedding(len(UI_ROLES), d)
-            self.ui_vec = nn.Linear(UI_VEC_DIM, d)
+            self.ui_vec = nn.Linear(UI_VEC_DIM if cfg.ui_param_match else 6, d)
         self.ui = cfg.ui
         self.mlp = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, cfg.ff), nn.GELU(), nn.Linear(cfg.ff, d))
         self.id_dropout = cfg.id_dropout
@@ -218,7 +221,7 @@ class ActionEncoder(nn.Module):
         words = (self.words(w) * wmask).sum(2) / wmask.sum(2).clamp_min(1)
         x = self.id(ids) + self.cat(batch["act_cat"]) + self.scope(batch["act_scope"]) + words + self.vec(batch["act_vec"])
         if self.ui:
-            x = x + self.role(batch["act_role"]) + self.ui_vec(batch["act_ui"])
+            x = x + self.role(batch["act_role"]) + self.ui_vec(batch["act_ui"][..., : self.ui_vec.in_features])
         return x + self.mlp(x)
 
 

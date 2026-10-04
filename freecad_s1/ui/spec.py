@@ -175,6 +175,23 @@ def targets(command: str, f: GoalFeature, scale: float) -> dict[str, object]:
     return {}
 
 
+def annotate_targets(ui: dict | None, goal, progress: int | None) -> None:
+    """Add the parameter stage's value ("target") to the numeric fields of a
+    recorded dialog state that predates UiSession reporting it. The intent is
+    the one being worked on (`progress`), as UiSession uses when the dialog
+    opens on plan; off-plan dialogs are cancelled whatever the fields hold."""
+    if not ui or not ui.get("dialog") or progress is None or progress < 0 or not goal.features:
+        return
+    fields = ui.get("fields", {})
+    if any("target" in f for f in fields.values()):
+        return
+    f = goal.features[min(progress, len(goal.features) - 1)]
+    tg = targets(ui["dialog"], f, goal.scale)
+    for name, fld in fields.items():
+        if fld.get("kind") == "number":
+            fld["target"] = tg.get(name)
+
+
 def ui_step_budget(goal, start) -> int:
     """Step budget for a UI episode: the command-level plan plus, per intent,
     a task dialog's field edits and OK (at most ~5), doubled + 6 like
