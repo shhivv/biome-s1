@@ -68,6 +68,7 @@ class EpisodeResult:
     features: list[str]
     rule: str | None = None  # held-out composition rule the goal matches, if any
     deviations: int = 0  # policy steps whose action was not expert-acceptable (injected steps excluded)
+    history: list[str] | None = None  # actions taken (kept for failed episodes, for error analysis)
 
 
 def run_episodes(policy: Policy, vec: VecEnv, specs: list[dict], sample: bool = False,
@@ -92,7 +93,7 @@ def run_episodes(policy: Policy, vec: VecEnv, specs: list[dict], sample: bool = 
         chosen = policy.act([e.state for e in cur], [e.goal for e in cur], [e.actions for e in cur], sample=sample)
         for k, i in enumerate(active):
             e = eps[i]
-            if collect is not None and e.expert:
+            if collect is not None and e.expert and set(e.expert) & set(e.actions):
                 collect.add(make_example(e.state, e.goal, e.actions, e.expert, e.progress,
                                          **policy.model.cfg.feature_opts()), f"dagger-{specs[i].get('seed')}",
                             e.level, -1.0, e.expert)
@@ -132,5 +133,6 @@ def run_episodes(policy: Policy, vec: VecEnv, specs: list[dict], sample: bool = 
         outcome = "success" if success else ("wrong_geometry" if e.done else e.outcome)
         results.append(EpisodeResult(e.level, success, success and e.outcome == "done_clean", sc["iou"], e.steps,
                                      e.budget, n, e.agree / max(ps, 1), outcome,
-                                     [f.kind for f in e.goal.features], heldout_composition(e.goal), ps - e.agree))
+                                     [f.kind for f in e.goal.features], heldout_composition(e.goal), ps - e.agree,
+                                     None if success else list(e.history)))
     return results

@@ -49,6 +49,8 @@ ACT_VEC_DIM = 6
 UI_VEC_DIM = 6
 UI_ROLES = UIS.ROLES
 _ROLE = {r: i for i, r in enumerate(UI_ROLES)}
+UI_FIELDS = sorted({f.name for fields in UIS.DIALOG_FIELDS.values() for f in fields})  # one-hot in recent tokens
+_FIELD = {n: i for i, n in enumerate(UI_FIELDS)}
 UI_WORD_VOCAB = WORD_VOCAB + sorted({w for e in UIS.UI_ID_EXAMPLES for w in action_words(e)} - set(WORD_VOCAB))
 _UI_WORD = {w: i for i, w in enumerate(UI_WORD_VOCAB)}
 
@@ -83,7 +85,8 @@ def _clip(x: float, lim: float = 8.0) -> float:
     return float(max(-lim, min(lim, x)))
 
 
-def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bool = False, ui: bool = False) -> Tokens:
+def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bool = False, ui: bool = False,
+                 ui_recent: bool = False) -> Tokens:
     """`invariant` (H5): drop numeric features whose magnitude grows with the
     length of the build (tree size, number of intents, intents remaining) and
     express face/edge counts relative to the target, so longer goals do not
@@ -94,7 +97,9 @@ def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bo
     (used by the modular architecture's pointer).
 
     `ui`: recent actions are UI element ids; their tokens get the element's
-    role (an extra `b` range after B_VOCAB, only in UI models)."""
+    role (an extra `b` range after B_VOCAB, only in UI models). With
+    `ui_recent`, a recent dialog edit also says which field it touched
+    (one-hot over UI_FIELDS), so the model can tell what is filled in."""
     scale = goal.scale if goal.scale > 0 else 1.0
     tgt_vol = goal.target.volume if goal.target.volume > 0 else scale ** 3
     rows: list[tuple[int, int, int, int, list[float]]] = []
@@ -150,7 +155,11 @@ def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bo
     for i, act in enumerate(reversed(state.recent)):
         if ui:
             r = UIS.role(act)
-            rows.append((SEG_RECENT, _ACT.get(UIS.underlying(act) or act, 0), B_VOCAB + _ROLE.get(r, 0), i, []))
+            num = []
+            if ui_recent and r in ("set", "opt", "toggle") and UIS.field_name(act) in _FIELD:
+                num = [0.0] * len(UI_FIELDS)
+                num[_FIELD[UIS.field_name(act)]] = 1.0
+            rows.append((SEG_RECENT, _ACT.get(UIS.underlying(act) or act, 0), B_VOCAB + _ROLE.get(r, 0), i, num))
         else:
             rows.append((SEG_RECENT, _ACT.get(act, 0), 0, i, []))
 
@@ -275,10 +284,10 @@ class Example:
 
 def make_example(state: State, goal: Goal, actions: list[str], acceptable: list[str] | None = None,
                  progress: int | None = None, invariant: bool = False, sentinel: bool = False,
-                 ui: bool = False) -> Example:
+                 ui: bool = False, ui_recent: bool = False) -> Example:
     acc = set(acceptable or [])
     scale = goal.scale if goal.scale > 0 else 1.0
-    return Example(encode_state(state, goal, invariant, sentinel, ui),
+    return Example(encode_state(state, goal, invariant, sentinel, ui, ui_recent),
                    encode_actions(actions, ui, state.ui, scale),
                    np.array([a in acc for a in actions], dtype=bool), -1 if progress is None else int(progress))
 

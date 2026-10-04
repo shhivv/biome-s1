@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import pickle
 import random
 import time
 from pathlib import Path
@@ -100,9 +101,16 @@ def main() -> None:
     ap.add_argument("--modular", action="store_true",
                     help="stage-wise modular policy: actions see only the state + the active intent")
     ap.add_argument("--aux-coef", type=float, default=0.5, help="weight of the progress-pointer loss")
+    ap.add_argument("--ui-recent-fields", action="store_true",
+                    help="UI models: recent dialog edits carry which field they touched")
     ap.add_argument("--ui", action="store_true",
                     help="UI-level model on data from freecad_s1.ui.datagen (DAgger runs hidden FreeCAD GUIs)")
     ap.add_argument("--max-examples", type=int, default=0, help="subsample training set (0 = all)")
+    ap.add_argument("--init", help="start from this checkpoint's weights (its config must match the flags)")
+    ap.add_argument("--beta-start", type=float, default=0.5,
+                    help="DAgger round r mixes in the expert's action with prob beta_start * 0.5**r (0 = policy only)")
+    ap.add_argument("--extra-data", nargs="*", default=[],
+                    help="pickled Datasets to add to training (e.g. a previous run's dagger_round*.pkl)")
     ap.add_argument("--dagger-rounds", type=int, default=0)
     ap.add_argument("--dagger-episodes", type=int, default=240, help="episodes per level per round")
     ap.add_argument("--dagger-epochs", type=int, default=3)
@@ -119,9 +127,15 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
-    ap_cfg = S1Config(invariant_numerics=args.invariant_numerics, modular=args.modular, ui=args.ui)
+    ap_cfg = S1Config(invariant_numerics=args.invariant_numerics, modular=args.modular, ui=args.ui,
+                      ui_recent_fields=args.ui_recent_fields)
     full = load_dataset(args.data, **ap_cfg.feature_opts())
     train, val = full.split()
+    for path in args.extra_data:
+        with open(path, "rb") as fh:
+            extra = pickle.load(fh)
+        print(f"+{len(extra)} examples from {path}")
+        train.extend(extra)
     if args.max_examples and len(train) > args.max_examples:
         train = train.subset(sorted(rng.sample(range(len(train)), args.max_examples)))
     print(f"loaded {len(full)} examples ({len(train)} train / {len(val)} val) in {time.time() - t0:.0f}s")
@@ -129,8 +143,14 @@ def main() -> None:
     cfg = S1Config(width=args.width, enc_layers=args.enc_layers, dec_layers=args.dec_layers, ff=args.ff,
                    pos_mode=args.pos_mode, ordinal=args.ordinal, progress_head=args.progress_head,
                    invariant_numerics=args.invariant_numerics, modular=args.modular, pointer=args.pointer,
-                   index_eval=args.index_eval, type_dropout=args.type_dropout, ui=args.ui)
-    model = S1Model(cfg).to(device)
+                   index_eval=args.index_eval, type_dropout=args.type_dropout, ui=args.ui,
+                   ui_recent_fields=args.ui_recent_fields)
+    model = S1Model(cfg)
+    if args.init:
+        state = torch.load(args.init, map_location="cpu", weights_only=True)["state_dict"]
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        print(f"init from {args.init} (missing {missing}, unexpected {unexpected})")
+    model = model.to(device)
     print(f"model params: {parameter_count(model):,} on {device}")
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -153,7 +173,7 @@ def main() -> None:
             for r in range(args.dagger_rounds):
                 collected = Dataset()
                 results = []
-                beta = 0.5 ** (r + 1)  # mix expert actions early, pure policy later
+                beta = args.beta_start * 0.5 ** r  # mix expert actions early, pure policy later
                 policy = Policy(model, device)
                 for level in (1, 2, 3):
                     for s in range(0, args.dagger_episodes, args.dagger_workers):
@@ -165,6 +185,8 @@ def main() -> None:
                 print(f"[dagger {r}] beta {beta:.2f} rollout success {json.dumps({k: v['success'] if isinstance(v, dict) else v for k, v in summary.items()})} "
                       f"+{len(collected)} labeled states", flush=True)
                 train.extend(collected)
+                with open(out / f"dagger_round{r}.pkl", "wb") as fh:  # reusable by --extra-data
+                    pickle.dump(collected, fh, protocol=pickle.HIGHEST_PROTOCOL)
                 best = train_epochs(model, opt, train, device, args.dagger_epochs, args.batch, args.lr * 0.3, 100,
                                     val=val, out=out, tag=f"dagger{r}", best=best, aux_coef=args.aux_coef)
                 history["dagger"].append({"round": r, "beta": beta, "rollout": summary, "added": len(collected)})

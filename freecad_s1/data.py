@@ -17,7 +17,7 @@ from .ui import spec as UIS
 from .model.featurize import Example, make_example
 from .schema import Goal, State
 
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 
 
 def label_category(acceptable: list[str]) -> str:
@@ -101,6 +101,8 @@ def _load_shard(args: tuple[str, dict]) -> Dataset:
         if "goal" in rec:
             goals[rec["ep"]] = Goal.from_json(rec["goal"])
             continue
+        if not set(rec["acceptable"]) & set(rec["actions"]):
+            continue  # no correct option offered (rare GUI corner case): no learning signal
         ex = make_example(State.from_json(rec["state"]), goals[rec["ep"]], rec["actions"], rec["acceptable"],
                           rec.get("progress"), **opts)
         ds.add(ex, rec["ep"], rec["level"], rec["noise"], rec["acceptable"])

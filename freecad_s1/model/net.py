@@ -98,12 +98,15 @@ class S1Config:
     # UI-level model (freecad_s1/ui): options are interface elements with a
     # role and live widget values; recent tokens carry the element role.
     ui: bool = False
+    ui_recent_fields: bool = False  # recent dialog edits carry which field they touched
 
     def feature_opts(self) -> dict:
         """Featurization options this model was trained with."""
         opts = {"invariant": self.invariant_numerics, "sentinel": self.modular}
         if self.ui:
             opts["ui"] = True
+        if self.ui_recent_fields:
+            opts["ui_recent"] = True
         return opts
 
     @property

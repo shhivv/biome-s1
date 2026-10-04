@@ -115,7 +115,10 @@ def online_metrics(model: S1Model, device: torch.device, suites=("iid", "comp", 
                     results += batch
     finally:
         vec.close()
-    return summarize(results)
+    report = summarize(results)
+    report["failures"] = [{"suite_level": r.level, "features": r.features, "outcome": r.outcome, "iou": r.iou,
+                           "steps": r.steps, "history": r.history} for r in results if not r.success]
+    return report
 
 
 def _rates(rs) -> dict:

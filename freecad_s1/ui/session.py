@@ -30,6 +30,7 @@ Must run inside the FreeCAD GUI (it can be hidden: `open -g -j` on macOS).
 from __future__ import annotations
 
 import copy
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -51,6 +52,7 @@ from .teacher import command_elements, dialog_elements, dialog_expert, fields_on
 # it creates a document; with the history out of reach, transaction counts
 # stay exact (at the cap, a GUI-side extra transaction cannot be told apart).
 GUI_UNDO_LIMIT = 2000
+QUIET_CHECKBOXES = ("checkBoxUpdateView", "showTransparentPreviewCheckBox")
 
 _NUMBER = re.compile(r"-?\d+(?:[.,]\d+)?")
 MAX_COUNT = 100  # pattern occurrences above this are refused outright
@@ -125,6 +127,10 @@ class UiSession(GuiSession):
     def __init__(self) -> None:
         App.ParamGet("User parameter:BaseApp/Preferences/Document").SetInt("MaxUndoSize", GUI_UNDO_LIMIT)
         super().__init__()
+        # Experimental (S1_QUIET_DIALOGS=1): switch off a task dialog's live
+        # preview / recompute-on-change when it opens; OK still computes the
+        # feature. Not exposed to the model.
+        self.quiet_dialogs = os.environ.get("S1_QUIET_DIALOGS") == "1"
         self.pending: Pending | None = None
         self.messages: list[str] = []
 
@@ -341,6 +347,12 @@ class UiSession(GuiSession):
         pending.feature = next((o.Name for o in self.doc.Objects
                                 if o.Name not in names_before and o.TypeId in SOLID_FEATURE_TYPES), None)
         self.pending = pending
+        if self.quiet_dialogs:
+            for name in QUIET_CHECKBOXES:
+                w = self._widget(name)
+                if w is not None and w.isEnabled() and w.isChecked():
+                    with ModalGuard(pending.messages):
+                        w.click()
         # Fail loudly on a dialog that is not the one the spec describes (e.g.
         # Pad's sketch picker when two unused sketches exist): a field that is
         # silently missing would let OK commit FreeCAD's default.
