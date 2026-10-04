@@ -111,6 +111,10 @@ def main() -> None:
                     help="DAgger round r mixes in the expert's action with prob beta_start * 0.5**r (0 = policy only)")
     ap.add_argument("--extra-data", nargs="*", default=[],
                     help="pickled Datasets to add to training (e.g. a previous run's dagger_round*.pkl)")
+    ap.add_argument("--dagger-perturb", type=float, default=0.0,
+                    help="DAgger: probability of replacing a policy action by a random one (recovery practice)")
+    ap.add_argument("--dagger-perturb-frac", type=float, default=0.5,
+                    help="DAgger: fraction of rollout batches that get --dagger-perturb")
     ap.add_argument("--dagger-rounds", type=int, default=0)
     ap.add_argument("--dagger-episodes", type=int, default=240, help="episodes per level per round")
     ap.add_argument("--dagger-epochs", type=int, default=3)
@@ -180,7 +184,10 @@ def main() -> None:
                         specs = [{"level": level, "seed": 10_000 * (r + 1) + level * 1000 + s + i}
                                  for i in range(args.dagger_workers)]
                         assert specs[-1]["seed"] < TEST_SEED_BASE
-                        results += run_episodes(policy, vec, specs, collect=collected, beta=beta, rng=rng)
+                        # perturbed rollouts: random off-plan actions the policy must notice and repair
+                        perturb = args.dagger_perturb if rng.random() < args.dagger_perturb_frac else 0.0
+                        results += run_episodes(policy, vec, specs, collect=collected, beta=beta, rng=rng,
+                                                perturb=perturb)
                 summary = summarize(results)
                 print(f"[dagger {r}] beta {beta:.2f} rollout success {json.dumps({k: v['success'] if isinstance(v, dict) else v for k, v in summary.items()})} "
                       f"+{len(collected)} labeled states", flush=True)
