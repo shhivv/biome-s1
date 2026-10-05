@@ -29,24 +29,26 @@ You give it a goal, an ordered list of features like *"plate 40×30×12 → Ø4 
 | `click:OK` / `click:Cancel` | the dialog is committed, or backed out of when it was opened by mistake |
 
 - **Tiny and fast.** 1.2M parameters, trained from scratch, ~1 ms per decision on a CPU. No LLM, no vision model, no screenshots.
-- **Everything Taiga-S1 does, through the real interface.** Same goals, same feature vocabulary, same test suites, at essentially the same accuracy: 99.75% of 800 held-out parts built correctly.
+- **Everything Taiga-S1 does, through the real interface.** Same goals, same feature vocabulary, same test suites, at nearly the same accuracy: 99.75% of 800 held-out parts built correctly, 98.9% correctly and cleanly (no stray objects left), against 90–100% per suite for Taiga-S1.
 - **Handles longer goals than it trained on.** Trained on goals of up to 5 features, it builds 99% of 11-feature goals (~80+ interface steps).
-- **Recovers from mistakes.** With 20% of its actions replaced by random clicks, it notices the damage (cancels the wrong dialog, undoes the wrong feature) and still builds 92–100% of parts.
+- **Recovers from mistakes.** With 20% of its actions replaced by random clicks, it notices the damage (cancels the wrong dialog, undoes the wrong feature) and still builds the right part 92–100% of the time. On long goals it often leaves something a random click created behind (55–74% clean, against 86–90% for Taiga-S1): the main gap to close.
 
 ## Results
 
-| Goal | Built correctly | With 20% random actions injected | Taiga-S1 (commands, for reference) |
-|---|---|---|---|
-| Parts like the training set (levels 1 / 2 / 3, up to 5 features) | 100 / 100 / 100% | 100 / 99 / 98% | 100% (98–100% perturbed) |
-| Feature combinations never seen in training | 100% | 100% | 90% (96%) |
-| Another unseen pairing | 100% | 98% | 100% (95%) |
-| 6–7 features | 100% | 97% | 100% (88%) |
-| 8–9 features | 99% | 95% | 100% (97%) |
-| 11 features | 99% | 92% | 100% (95%) |
+Built correctly *and cleanly* (no stray objects left in the document), with the "right part" rate in brackets where it differs:
 
-"Built correctly" means the model issued `Done` and the final solid matches the target exactly (volumetric IoU ≥ 0.99). Each row is 100 fresh synthetic goals in FreeCAD 1.1, driven through the GUI. Per-step accuracy against the teacher's choices is 99.86% on held-out states.
+| Goal | Mesa-S1 | With 20% random actions injected | Taiga-S1 (commands, for reference) | Taiga-S1, random actions |
+|---|---|---|---|---|
+| Parts like the training set (levels 1 / 2 / 3, up to 5 features) | 100 / 100 / 99% (100) | 99 / 98 / 85% (100 / 99 / 98) | 100% | 100 / 93 / 95% (100 / 98 / 98) |
+| Feature combinations never seen in training | 99% (100) | 89% (100) | 90% | 95% (96) |
+| Another unseen pairing | 100% | 95% (98) | 100% | 94% (95) |
+| 6–7 features | 97% (100) | 74% (97) | 100% | 86% (88) |
+| 8–9 features | 99% | 70% (95) | 100% | 87% (97) |
+| 11 features | 97% (99) | 55% (92) | 100% | 90% (95) |
 
-Across the 800 clean episodes the model made no wrong decision that cost a part; both failures were FreeCAD crashes. **FreeCAD crashes.** Driven through its GUI, FreeCAD 1.1 segfaults in roughly 3–5% of long episodes, inside its own geometry and dialog code. The runtime recovers like FreeCAD's autosave: it restarts FreeCAD, replays the episode so far (episodes are deterministic) and retries the action. In the clean evaluation FreeCAD crashed 69 times, 55 were recovered, and the episodes it could not recover count as failures above. With random actions injected: 79 crashes, 67 recovered.
+"Built correctly" means the model issued `Done` and the final solid matches the target exactly (volumetric IoU ≥ 0.99); "cleanly" means no stray objects remain. Each row is 100 fresh synthetic goals in FreeCAD 1.1, driven through the GUI. Per-step accuracy against the teacher's choices is 99.86% on held-out states.
+
+Across the 800 clean episodes the model made no wrong decision that cost a part (both failures were FreeCAD crashes); it left a stray object behind in 7. **FreeCAD crashes.** Driven through its GUI, FreeCAD 1.1 segfaults in roughly 3–5% of long episodes, inside its own geometry and dialog code. The runtime recovers like FreeCAD's autosave: it restarts FreeCAD, replays the episode so far (episodes are deterministic) and retries the action. In the clean evaluation FreeCAD crashed 69 times, 55 were recovered, and the episodes it could not recover count as failures above. With random actions injected: 79 crashes, 67 recovered.
 
 ## Usage
 
