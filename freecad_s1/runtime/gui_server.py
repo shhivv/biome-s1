@@ -29,10 +29,15 @@ class GuiServer:
         from PySide import QtCore
 
         if ui:
-            from ..ui.session import UiSession
+            import os
+
             from ..ui.spec import ui_step_budget
 
-            self.worker = Worker(UiSession(), HeadlessSession(), budget_fn=ui_step_budget)
+            if os.environ.get("S1_DEMO") == "1":  # highlight every action on screen (scripts/mesa_demo.py)
+                from ..ui.demo import DemoUiSession as Session
+            else:
+                from ..ui.session import UiSession as Session
+            self.worker = Worker(Session(), HeadlessSession(), budget_fn=ui_step_budget)
         else:
             self.worker = Worker(GuiSession(), HeadlessSession())
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -79,7 +84,9 @@ class GuiServer:
             self.conn.close()
             os._exit(0)
         try:
-            resp = {"ok": True, **self.worker.handle(req)}
+            extra = getattr(self.worker.session, "handle_extra", None)
+            out = extra(req) if extra is not None else None
+            resp = {"ok": True, **(out if out is not None else self.worker.handle(req))}
         except Exception as exc:
             resp = {"ok": False, "error": f"{type(exc).__name__}: {exc}", "trace": traceback.format_exc()}
         self.conn.setblocking(True)

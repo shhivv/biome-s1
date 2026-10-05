@@ -1,6 +1,6 @@
 # Biome-S1
 
-![Parts the Biome-S1 models built in FreeCAD](release/hf/assets/cover.png)
+![Biome-S1: parts the models built in FreeCAD](assets/cover.png)
 
 **A family of tiny, fast "System 1" models for computer-use agents.**
 
@@ -118,7 +118,12 @@ FREECAD_S1_REPO=$PWD /Applications/FreeCAD.app/Contents/MacOS/FreeCAD scripts/fr
 # Watch Mesa-S1 operate the FreeCAD interface
 FREECAD_S1_REPO=$PWD FREECAD_S1_UI=1 /Applications/FreeCAD.app/Contents/MacOS/FreeCAD scripts/freecad_gui_server.FCMacro &
 .venv/bin/python scripts/gui_demo.py --model release/mesa-s1 --level 3 --split iid --seed 7
+
+# Record Mesa-S1 building the showcase parts, every action highlighted on screen -> runs/mesa_demo/*.mp4
+.venv/bin/python scripts/mesa_demo.py --all
 ```
+
+`scripts/mesa_demo.py` runs a visible FreeCAD with `freecad_s1/ui/demo.py`: before each action it outlines the element the model chose (toolbar button, dialog field, dropdown, check box, OK/Cancel), types numbers into fields keystroke by keystroke, and captions the element id, the number of options and the model's decision time. The actions themselves are applied to the widgets programmatically; the highlight shows which one.
 
 Reproduce Taiga-S1 (data → SFT + DAgger → eval):
 

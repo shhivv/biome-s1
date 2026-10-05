@@ -197,7 +197,8 @@ def self_guard(poll: float = 0.25, mem_limit_gb: float | None = None, timeout: f
 
 
 def launch_gui_script(script: str | Path, env: dict[str, str], log: str | Path | None = None,
-                      mem_limit_gb: float = DEFAULT_MEM_LIMIT_GB, timeout: float = DEFAULT_TIMEOUT) -> GuiProcess:
+                      mem_limit_gb: float = DEFAULT_MEM_LIMIT_GB, timeout: float = DEFAULT_TIMEOUT,
+                      hidden: bool = True) -> GuiProcess:
     """Run `script` in a new hidden FreeCAD GUI under the watchdog. The script
     should end with `os._exit` so FreeCAD quits when it is done."""
     script = str(Path(script).resolve())
@@ -207,7 +208,8 @@ def launch_gui_script(script: str | Path, env: dict[str, str], log: str | Path |
            "S1_PARENT_PID": str(os.getpid()), **env}
     log = str(Path(log).resolve()) if log else os.devnull
     if sys.platform == "darwin":
-        cmd = ["open", "-g", "-j", "-n", "-W", "--stdout", log, "--stderr", log]
+        # -g: don't take focus; -j: launch hidden. Demos (hidden=False) need a real, rendered window.
+        cmd = ["open", "-g", *(["-j"] if hidden else []), "-n", "-W", "--stdout", log, "--stderr", log]
         for k, v in env.items():
             cmd += ["--env", f"{k}={v}"]
         cmd += ["-a", freecad_app(), "--args", script]

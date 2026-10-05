@@ -1,0 +1,214 @@
+{
+  "flange": {
+    "level": 3,
+    "scale": 72,
+    "features": [
+      {
+        "kind": "base_cyl",
+        "params": {
+          "r": 36,
+          "h": 8
+        }
+      },
+      {
+        "kind": "boss_cyl",
+        "params": {
+          "r": 15,
+          "x": 0,
+          "y": 0,
+          "h": 12
+        }
+      },
+      {
+        "kind": "hole",
+        "params": {
+          "r": 3.2,
+          "x": 26,
+          "y": 0
+        }
+      },
+      {
+        "kind": "polar_pattern",
+        "params": {
+          "n": 6
+        }
+      },
+      {
+        "kind": "chamfer_top",
+        "params": {
+          "size": 1.5
+        }
+      }
+    ]
+  },
+  "hex_nut": {
+    "level": 2,
+    "scale": 32,
+    "features": [
+      {
+        "kind": "base_hex",
+        "params": {
+          "r": 16,
+          "h": 12
+        }
+      },
+      {
+        "kind": "hole_std",
+        "params": {
+          "r": 8,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "kind": "chamfer_top",
+        "params": {
+          "size": 1.5
+        }
+      }
+    ]
+  },
+  "enclosure": {
+    "level": 3,
+    "scale": 70,
+    "features": [
+      {
+        "kind": "base_box",
+        "params": {
+          "w": 70,
+          "d": 45,
+          "h": 28
+        }
+      },
+      {
+        "kind": "fillet_vertical",
+        "params": {
+          "r": 6
+        }
+      },
+      {
+        "kind": "shell",
+        "params": {
+          "t": 2
+        }
+      }
+    ]
+  },
+  "mounting_plate": {
+    "level": 4,
+    "scale": 90,
+    "features": [
+      {
+        "kind": "base_box",
+        "params": {
+          "w": 90,
+          "d": 60,
+          "h": 6
+        }
+      },
+      {
+        "kind": "pocket_rect",
+        "params": {
+          "w": 36,
+          "d": 20,
+          "x": 0,
+          "y": 0,
+          "depth": 3
+        }
+      },
+      {
+        "kind": "hole",
+        "params": {
+          "r": 3.5,
+          "x": 36,
+          "y": 22
+        }
+      },
+      {
+        "kind": "mirror",
+        "params": {}
+      },
+      {
+        "kind": "hole",
+        "params": {
+          "r": 3.5,
+          "x": 36,
+          "y": -22
+        }
+      },
+      {
+        "kind": "mirror",
+        "params": {}
+      },
+      {
+        "kind": "chamfer_top",
+        "params": {
+          "size": 1
+        }
+      }
+    ]
+  },
+  "washer": {
+    "level": 2,
+    "scale": 40,
+    "features": [
+      {
+        "kind": "base_ring",
+        "params": {
+          "ri": 9,
+          "ro": 20,
+          "h": 5
+        }
+      },
+      {
+        "kind": "chamfer_top",
+        "params": {
+          "size": 1
+        }
+      }
+    ]
+  },
+  "slotted_wheel": {
+    "level": 3,
+    "scale": 64,
+    "features": [
+      {
+        "kind": "base_cyl",
+        "params": {
+          "r": 32,
+          "h": 10
+        }
+      },
+      {
+        "kind": "hole_std",
+        "params": {
+          "r": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "kind": "pocket_rect",
+        "params": {
+          "w": 10,
+          "d": 5,
+          "x": 21,
+          "y": 0,
+          "depth": 5
+        }
+      },
+      {
+        "kind": "polar_pattern",
+        "params": {
+          "n": 8
+        }
+      },
+      {
+        "kind": "fillet_top",
+        "params": {
+          "r": 1.5
+        }
+      }
+    ]
+  }
+}
