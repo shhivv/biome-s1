@@ -11,6 +11,7 @@ System-1 model's job.
 from __future__ import annotations
 
 import math
+import os
 import random
 from dataclasses import dataclass
 
@@ -301,14 +302,40 @@ def _patterned_pocket_goal(rng: random.Random) -> Goal:
     return Goal(feats, level=3, scale=_scale(base))
 
 
+# FreeCAD's task-dialog defaults, per goal parameter. Round numbers like these
+# are common in real parts, and when the goal asks for one the dialog field
+# already holds it: the right move is to click OK without typing. Training
+# goals snap parameters to these values with probability S1_DEFAULT_SNAP
+# (training split only; evaluation suites are unchanged).
+DIALOG_DEFAULTS = {
+    "base_box": {"h": 10.0}, "base_cyl": {"h": 10.0}, "base_hex": {"h": 10.0},
+    "boss_cyl": {"h": 10.0}, "boss_box": {"h": 10.0}, "pocket_rect": {"depth": 5.0}, "hole_std": {"r": 3.0},
+    "fillet_top": {"r": 1.0}, "fillet_vertical": {"r": 1.0}, "chamfer_top": {"size": 1.0}, "shell": {"t": 1.0},
+    "linear_pattern": {"n": 2.0},
+}
+DEFAULT_SNAP = float(os.environ.get("S1_DEFAULT_SNAP", "0"))
+
+
+def snap_to_defaults(goal: Goal, rng: random.Random, p: float) -> Goal:
+    for f in goal.features:
+        for key, value in DIALOG_DEFAULTS.get(f.kind, {}).items():
+            if key in f.params and rng.random() < p:
+                f.params[key] = value
+    return goal
+
+
 def sample_split_goal(split: str, level: int, rng: random.Random, tries: int = 2000) -> Goal:
     if split == "comp2":
         return _mirrored_boss_box_goal(rng)
     if split == "comp3":
         return _patterned_pocket_goal(rng)
+    if split == "defaults":  # held-out test: in-distribution goals with many parameters at dialog defaults
+        return snap_to_defaults(sample_split_goal("iid", level, rng, tries), rng, 0.6)
     for _ in range(tries):
         goal = sample_goal(level, rng)
         if goal_in_split(goal, split):
+            if split == "train" and DEFAULT_SNAP > 0:
+                snap_to_defaults(goal, rng, DEFAULT_SNAP)
             return goal
     raise ValueError(f"could not sample a {split} goal at level {level}")
 

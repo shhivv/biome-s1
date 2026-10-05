@@ -69,13 +69,14 @@ def offline_metrics(model: S1Model, ds: Dataset, device: torch.device, batch_siz
 
 
 # Seed offsets keep suites that share a level (iid-L3, comp, comp2, comp3) on disjoint seeds.
-SPLIT_SEED_OFFSET = {"iid": 0, "comp": 10_000, "comp2": 20_000, "comp3": 30_000, "len": 0}
+SPLIT_SEED_OFFSET = {"iid": 0, "comp": 10_000, "comp2": 20_000, "comp3": 30_000, "len": 0, "defaults": 40_000}
 
 SUITES = {
     "iid": [(1, "iid"), (2, "iid"), (3, "iid")],  # training distribution, fresh goals
     "comp": [(3, "comp")],  # held-out feature combinations (goals.heldout_composition)
     "comp2": [(3, "comp2")],  # held-out pair boss_box -> mirror (seen by the model before the M design)
     "comp3": [(3, "comp3")],  # held-out pair pocket_rect -> polar_pattern; evaluated once, on the final model
+    "defaults": [(3, "defaults")],  # parameters at FreeCAD's dialog defaults (nothing to type before OK)
     "len": [(4, "len")],  # held-out length: 6-7 intents, training has <= 5
     "len2": [(5, "len")],  # held-out length: 8-9 intents
     "len3": [(6, "len")],  # held-out length: 11 intents (2.2x the training maximum)
