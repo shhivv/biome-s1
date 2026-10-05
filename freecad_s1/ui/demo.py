@@ -59,6 +59,9 @@ class Overlay(QtWidgets.QWidget):
         self.caption = ""
         self.note = ""
         self.pressed = False
+        self.cursor_pos: QtCore.QPointF | None = None  # arrow cursor tip, animated between targets
+        self.show_caption = True  # off for teaser recordings: the editor draws captions outside the zoomed shot
+        self.show_cursor = True  # off for teaser recordings: the editor draws a vector cursor
         self.setGeometry(parent.rect())
         parent.installEventFilter(self)
         self.raise_()
@@ -103,16 +106,24 @@ class Overlay(QtWidgets.QWidget):
             p.setPen(pen)
             p.setBrush(fill)
             p.drawRoundedRect(r, 7, 7)
-            if not self.dashed:  # cursor dot, larger ring while "pressing"
-                c = r.center()
-                p.setPen(QtGui.QPen(PAPER, 2))
-                p.setBrush(INK)
-                p.drawEllipse(c, 7, 7)
-                if self.pressed:
-                    p.setBrush(QtCore.Qt.NoBrush)
-                    p.setPen(QtGui.QPen(ACCENT, 4))
-                    p.drawEllipse(c, 22, 22)
-        if self.caption:
+        if self.cursor_pos is not None and self.show_cursor:
+            c = self.cursor_pos
+            if self.pressed:  # click ring at the tip
+                p.setBrush(QtCore.Qt.NoBrush)
+                p.setPen(QtGui.QPen(ACCENT, 4))
+                p.drawEllipse(c, 22, 22)
+            arrow = QtGui.QPolygonF([QtCore.QPointF(x * 1.5, y * 1.5) for x, y in
+                                    ((0, 0), (0, 17), (4, 13.2), (7.2, 20), (9.8, 18.9), (6.7, 12.3), (12, 12.3))])
+            arrow.translate(c)
+            shadow = QtGui.QPolygonF(arrow)
+            shadow.translate(2, 3)
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(QtGui.QColor(0, 0, 0, 60))
+            p.drawPolygon(shadow)
+            p.setPen(QtGui.QPen(PAPER, 2))
+            p.setBrush(INK)
+            p.drawPolygon(arrow)
+        if self.caption and self.show_caption:
             font = QtGui.QFont(self.font())
             font.setPixelSize(22)
             font.setWeight(QtGui.QFont.DemiBold)
@@ -219,9 +230,10 @@ class Recorder:
 class DemoUiSession(UiSession):
     """UiSession that shows every action on screen before performing it."""
 
-    def __init__(self, dwell: float = 0.55, after: float = 0.3, type_delay: float = 0.07) -> None:
+    def __init__(self, dwell: float = 0.75, after: float = 0.3, type_delay: float = 0.07) -> None:
         super().__init__()
         self.dwell, self.after, self.type_delay = dwell, after, type_delay
+        self.move_time = 0.38  # cursor glide to the next target
         self.window = Gui.getMainWindow()
         self.overlay = Overlay(self.window)
         self.recorder = Recorder(self.window, self.overlay, get_view=self._session_view)
@@ -243,6 +255,10 @@ class DemoUiSession(UiSession):
             return {}
         if op == "record_stop":
             return {"frames": self.recorder.stop(), "events": self.recorder.events}
+        if op == "demo_options":
+            self.overlay.show_caption = bool(req.get("captions", True))
+            self.overlay.show_cursor = bool(req.get("cursor", True))
+            return {}
         if op == "demo_note":  # e.g. the model's decision time, shown in the caption
             self.overlay.note = req.get("text", "")
             return {}
@@ -322,14 +338,27 @@ class DemoUiSession(UiSession):
     def step(self, element: str) -> dict:
         widget, caption, dashed = self._locate(element)
         event = {"element": element, "start": self.recorder.n}
-        self.overlay.target(self._rect_of(widget), caption, dashed)
-        _wait(self.dwell)
+        rect = self._rect_of(widget)
+        W, H = max(self.window.width(), 1), max(self.window.height(), 1)
+        event["rect"] = None if rect is None else [rect.x() / W, rect.y() / H, rect.width() / W, rect.height() / H]
+        event["dashed"] = dashed  # 3D-view / sketch interaction (no widget)
+        event["caption"] = caption
+        event["note"] = self.overlay.note
+        self.overlay.target(rect, caption, dashed)
+        if rect is not None:
+            dest = QtCore.QPointF(rect.center()) + (QtCore.QPointF(rect.width() * 0.12, rect.height() * 0.1) if dashed else QtCore.QPointF(0, 0))
+            self._move_cursor(dest, min(self.move_time, self.dwell * 0.7))
+            _wait(self.dwell - min(self.move_time, self.dwell * 0.7))
+        else:
+            _wait(self.dwell)
         if S.role(element) == "set" and widget is not None and self.pending is not None:
             self._type_visibly(widget, element)
         self.overlay.press()
         event["press"] = self.recorder.n
         _wait(0.12)
+        t0 = time.perf_counter()
         info = super().step(element)
+        event["exec_ms"] = round((time.perf_counter() - t0) * 1000, 1)  # FreeCAD's own time for the action
         self.overlay.target(None, self.overlay.caption)  # the widget may be gone (dialog closed): keep only the caption
         if element in (S.OK, "cmd:Sketcher_LeaveSketch", "Done") and not info["error"]:
             self._frame_part()  # cosmetic: keep the part in view for the recording
@@ -338,6 +367,21 @@ class DemoUiSession(UiSession):
         event["end"] = self.recorder.n
         self.recorder.events.append(event)
         return info
+
+    def _move_cursor(self, dest: QtCore.QPointF, seconds: float) -> None:
+        start = self.overlay.cursor_pos
+        if start is None:
+            start = QtCore.QPointF(self.window.width() * 0.55, self.window.height() * 0.6)
+        t0 = time.time()
+        while True:
+            u = min(1.0, (time.time() - t0) / max(seconds, 1e-3))
+            e = 4 * u ** 3 if u < 0.5 else 1 - (-2 * u + 2) ** 3 / 2  # ease in-out
+            self.overlay.cursor_pos = start + (dest - start) * e
+            self.overlay.update()
+            QtWidgets.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 10)
+            if u >= 1.0:
+                break
+            time.sleep(0.008)
 
     def _session_view(self):
         if self.doc is None:

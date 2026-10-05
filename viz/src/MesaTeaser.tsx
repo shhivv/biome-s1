@@ -42,23 +42,76 @@ const Title: React.FC = () => {
   );
 };
 
+// macOS-style pointer, drawn as a vector so it stays crisp at any zoom; ripple on each click
+const Cursor: React.FC<{i: number; tx: number; ty: number; z: number}> = ({i, tx, ty, z}) => {
+  const [cx, cy] = SPEC.cursor[i];
+  const x = tx + cx * VIEW_W * z;
+  const y = ty + cy * VIEW_H * z;
+  const click = [...SPEC.clicks].reverse().find((c) => c <= i);
+  const since = click === undefined ? 99 : i - click;
+  const p = Math.min(1, since / 12);
+  const pressScale = since < 4 ? 0.86 + 0.035 * since : 1;
+  return (
+    <>
+      {since < 12 && (
+        <div style={{position: "absolute", left: x - (14 + 40 * p), top: y - (14 + 40 * p), width: 2 * (14 + 40 * p),
+          height: 2 * (14 + 40 * p), borderRadius: "50%", border: `${4 - 2 * p}px solid ${ACCENT}`,
+          background: `rgba(42,120,214,${0.18 * (1 - p)})`, opacity: 1 - p}} />
+      )}
+      <svg width={50} height={67} viewBox="0 0 24 32"
+        style={{position: "absolute", left: x - 3, top: y - 3, transform: `scale(${pressScale})`, transformOrigin: "3px 3px",
+          filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.35)) drop-shadow(0 1px 2px rgba(0,0,0,0.4))"}}>
+        <path d="M2.5 2.2 L2.5 25.2 L8.4 19.5 L12.5 28.9 L16.3 27.2 L12.3 18.1 L20.4 18.1 Z"
+          fill="#111" stroke="#fff" strokeWidth={1.8} strokeLinejoin="round" />
+      </svg>
+    </>
+  );
+};
+
+const VIEW_W = 1760;
+const VIEW_H = 990; // the recorded window is 16:9
+
 const Build: React.FC = () => {
   const f = useCurrentFrame();
   const i = Math.max(0, Math.min(SPEC.frames.length - 1, f - BUILD_START));
   const op = Math.min(fade(f, BUILD_START, BUILD_START + 8), 1 - fade(f, RESULT_START - 4, RESULT_START + 6));
   const element = SPEC.elements[i];
   const actionNo = SPEC.elements.slice(0, i + 1).filter((e, k, a) => k === 0 || a[k - 1] !== e).length;
+  // camera: push in on the widget being clicked (precomputed and smoothed in mesa_teaser_frames.py)
+  const z = SPEC.zoom[i];
+  const [fx, fy] = SPEC.focus[i];
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const tx = clamp(VIEW_W / 2 - fx * VIEW_W * z, VIEW_W - VIEW_W * z, 0);
+  const ty = clamp(VIEW_H / 2 - fy * VIEW_H * z, VIEW_H - VIEW_H * z, 0);
   return (
     <AbsoluteFill style={{opacity: op, alignItems: "center", justifyContent: "center"}}>
-      <div style={{position: "absolute", top: 34, left: 80, right: 80, display: "flex", justifyContent: "space-between",
-        fontSize: 22, fontWeight: 600, letterSpacing: 3, color: INK2}}>
+      <div style={{position: "absolute", top: 24, left: 80, right: 80, display: "flex", justifyContent: "space-between",
+        alignItems: "center", fontSize: 22, fontWeight: 600, letterSpacing: 3, color: INK2}}>
         <span>LIVE IN FREECAD · EVERY CLICK IS THE MODEL'S</span>
-        <span style={{fontVariantNumeric: "tabular-nums", letterSpacing: 1}}>
-          <span style={{color: ACCENT}}>{element === "Done" ? "Done" : `action ${actionNo}`}</span> / {SPEC.actions}</span>
+        <span style={{display: "flex", alignItems: "center", gap: 18}}>
+          <span style={{padding: "7px 16px", borderRadius: 999, background: INK, color: "#fff", fontSize: 20,
+            letterSpacing: 1, fontWeight: 600}}>SLOWED DOWN {SPEC.slowdown}× · REAL RUN {SPEC.run_s} S</span>
+          <span style={{fontVariantNumeric: "tabular-nums", letterSpacing: 1}}>
+            <span style={{color: ACCENT}}>{element === "Done" ? "Done" : `action ${actionNo}`}</span> / {SPEC.actions}</span>
+        </span>
       </div>
-      <Img src={staticFile(SPEC.frames[i])}
-        style={{width: 1760, marginTop: 40, borderRadius: 14, border: "1px solid rgba(0,0,0,0.12)",
-          boxShadow: "0 30px 70px rgba(0,0,0,0.18), 0 8px 18px rgba(0,0,0,0.10)"}} />
+      <div style={{width: VIEW_W, height: VIEW_H, marginTop: 44, borderRadius: 14, overflow: "hidden", position: "relative",
+        border: "1px solid rgba(0,0,0,0.12)", boxShadow: "0 30px 70px rgba(0,0,0,0.18), 0 8px 18px rgba(0,0,0,0.10)"}}>
+        <Img src={staticFile(SPEC.frames[i])}
+          style={{position: "absolute", left: 0, top: 0, width: VIEW_W, height: VIEW_H, transformOrigin: "0 0",
+            transform: `translate(${tx}px, ${ty}px) scale(${z})`}} />
+        <Cursor i={i} tx={tx} ty={ty} z={z} />
+        {/* caption: the element the model chose, verbatim (drawn here so the zoom never crops it) */}
+        <div style={{position: "absolute", bottom: 30, left: 0, right: 0, display: "flex", justifyContent: "center"}}>
+          <div style={{display: "flex", gap: 20, alignItems: "baseline", padding: "16px 30px", borderRadius: 999,
+            background: INK, color: "#fff", fontSize: 30, fontWeight: 600, boxShadow: "0 12px 30px rgba(0,0,0,0.25)"}}>
+            <span style={{color: "#7fb2f0", letterSpacing: 1}}>MESA-S1</span>
+            <span style={{fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 500}}>
+              {SPEC.captions[i]}</span>
+            {SPEC.notes[i] && <span style={{color: "#b9b9b9", fontSize: 24, fontWeight: 500}}>{SPEC.notes[i]}</span>}
+          </div>
+        </div>
+      </div>
     </AbsoluteFill>
   );
 };
@@ -77,7 +130,7 @@ const Result: React.FC = () => {
         <div style={{opacity: s(2), transform: `translateY(${(1 - s(2)) * 24}px)`, fontSize: 130, fontWeight: 800,
           color: INK, letterSpacing: -4}}>Mesa-S1</div>
         <div style={{display: "flex", flexDirection: "column", gap: 12, marginTop: 14}}>
-          {[`${SPEC.actions} actions, built exactly`, "1.2M parameters", "~4 ms per decision", "No LLM · no screenshots"].map((c, k) => (
+          {[`${SPEC.actions} actions, built exactly`, `Real time ${SPEC.run_s} s · model ${SPEC.model_s} s`, "1.2M parameters", "No LLM · no screenshots"].map((c, k) => (
             <div key={c} style={{opacity: s(5 + 3 * k), transform: `translateX(${(1 - s(5 + 3 * k)) * 20}px)`,
               fontSize: 34, color: INK2, fontWeight: 500, display: "flex", alignItems: "center", gap: 14}}>
               <span style={{width: 10, height: 10, borderRadius: 5, background: ACCENT}} />{c}</div>

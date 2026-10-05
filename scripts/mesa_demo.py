@@ -88,7 +88,10 @@ def run_part(srv: Server, policy: Policy, name: str, reset: dict, out: Path, fps
               "seconds": 2.5})
     stop = srv.call({"op": "record_stop"})
     n = stop["frames"]
-    (frames / "events.json").write_text(json.dumps(stop["events"]))  # per-action frame ranges, for the teaser cut
+    events = stop["events"]
+    for e, ms in zip(events, decide_ms):  # the model's decision time for each action
+        e["decide_ms"] = round(ms, 2)
+    (frames / "events.json").write_text(json.dumps(events))  # per-action frame ranges + timings, for the teaser cut
     srv.call({"op": "save", "fcstd": str(out / f"{name}.FCStd"), "png": str(out / f"{name}.png"),
               "width": 1600, "height": 1600})
     video = out / f"{name}.mp4"
@@ -114,6 +117,8 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8870)
     ap.add_argument("--max-steps", type=int, default=400)
     ap.add_argument("--mem-gb", type=float, default=3.0, help="watchdog: kill FreeCAD above this footprint")
+    ap.add_argument("--teaser", action="store_true",
+                    help="leave captions and the cursor out of the frames (the teaser draws them, crisp and unzoomed)")
     args = ap.parse_args()
 
     model = load_checkpoint(args.model) if args.model.endswith(".pt") else from_pretrained(args.model)
@@ -137,6 +142,7 @@ def main() -> None:
     try:
         srv = Server(args.port)
         srv.call({"op": "demo_window", "width": args.width, "height": args.height})
+        srv.call({"op": "demo_options", "captions": not args.teaser, "cursor": not args.teaser})
         for name, reset in jobs:
             print(f"== {name}")
             results.append(run_part(srv, policy, name, reset, out, args.fps, args.max_steps))
