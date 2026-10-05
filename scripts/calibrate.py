@@ -7,6 +7,7 @@ Split by episode: one half fits T (min multi-label NLL), the other half
 reports ECE / NLL / confidence before and after. Writes T into config.json.
 
     python scripts/calibrate.py --model release/hf
+    S1_MEM_LIMIT_GB=2.5 python scripts/calibrate.py --model release/mesa-s1 --workers 3
 """
 import sys
 from pathlib import Path
@@ -75,7 +76,12 @@ def main() -> None:
     policy = Policy(model, torch.device("cpu"))
     rng = random.Random(CALIB_SEED_BASE)
     ds = Dataset()
-    vec = VecEnv(args.workers)
+    if model.cfg.ui:  # UI-level model (Mesa-S1): hidden FreeCAD GUIs with crash recovery
+        from freecad_s1.ui.env import UiVecEnv
+
+        vec = UiVecEnv(args.workers)
+    else:
+        vec = VecEnv(args.workers)
     try:
         for suite in ("iid", "comp", "comp2", "len", "len2", "len3"):
             for level, split in SUITES[suite]:

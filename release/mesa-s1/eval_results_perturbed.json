@@ -1,0 +1,147 @@
+{
+  "episodes": {
+    "comp-L3": {
+      "episodes": 100,
+      "success": 1.0,
+      "clean_success": 0.89,
+      "zero_deviation_success": 0.88,
+      "clean_within_expert_plus_2": 0.43,
+      "mean_iou": 0.9999,
+      "on_policy_agreement": 0.9859,
+      "steps_over_expert": 1.07,
+      "outcomes": {
+        "success": 100
+      },
+      "by_rule": {
+        "mirrored_hole_std": {
+          "episodes": 51,
+          "success": 1.0,
+          "clean_success": 0.9412,
+          "zero_deviation_success": 0.9412,
+          "clean_within_expert_plus_2": 0.549
+        },
+        "pattern+boss_box": {
+          "episodes": 49,
+          "success": 1.0,
+          "clean_success": 0.8367,
+          "zero_deviation_success": 0.8163,
+          "clean_within_expert_plus_2": 0.3061
+        }
+      }
+    },
+    "comp2-L3": {
+      "episodes": 100,
+      "success": 0.98,
+      "clean_success": 0.95,
+      "zero_deviation_success": 0.94,
+      "clean_within_expert_plus_2": 0.52,
+      "mean_iou": 0.9996,
+      "on_policy_agreement": 0.9958,
+      "steps_over_expert": 1.042,
+      "outcomes": {
+        "success": 98,
+        "wrong_geometry": 2
+      },
+      "by_rule": {
+        "mirrored_boss_box": {
+          "episodes": 100,
+          "success": 0.98,
+          "clean_success": 0.95,
+          "zero_deviation_success": 0.94,
+          "clean_within_expert_plus_2": 0.52
+        }
+      }
+    },
+    "iid-L1": {
+      "episodes": 100,
+      "success": 1.0,
+      "clean_success": 0.99,
+      "zero_deviation_success": 0.98,
+      "clean_within_expert_plus_2": 0.61,
+      "mean_iou": 1.0,
+      "on_policy_agreement": 0.9983,
+      "steps_over_expert": 1.127,
+      "outcomes": {
+        "success": 100
+      }
+    },
+    "iid-L2": {
+      "episodes": 100,
+      "success": 0.99,
+      "clean_success": 0.98,
+      "zero_deviation_success": 0.97,
+      "clean_within_expert_plus_2": 0.62,
+      "mean_iou": 0.9975,
+      "on_policy_agreement": 0.9967,
+      "steps_over_expert": 1.078,
+      "outcomes": {
+        "success": 99,
+        "wrong_geometry": 1
+      }
+    },
+    "iid-L3": {
+      "episodes": 100,
+      "success": 0.98,
+      "clean_success": 0.85,
+      "zero_deviation_success": 0.82,
+      "clean_within_expert_plus_2": 0.4,
+      "mean_iou": 0.9991,
+      "on_policy_agreement": 0.9627,
+      "steps_over_expert": 1.087,
+      "outcomes": {
+        "success": 98,
+        "wrong_geometry": 2
+      }
+    },
+    "len-L4": {
+      "episodes": 100,
+      "success": 0.97,
+      "clean_success": 0.74,
+      "zero_deviation_success": 0.7,
+      "clean_within_expert_plus_2": 0.32,
+      "mean_iou": 0.9855,
+      "on_policy_agreement": 0.9369,
+      "steps_over_expert": 1.063,
+      "outcomes": {
+        "success": 97,
+        "crashed": 1,
+        "budget": 1,
+        "wrong_geometry": 1
+      }
+    },
+    "len2-L5": {
+      "episodes": 100,
+      "success": 0.95,
+      "clean_success": 0.7,
+      "zero_deviation_success": 0.69,
+      "clean_within_expert_plus_2": 0.23,
+      "mean_iou": 0.9941,
+      "on_policy_agreement": 0.9078,
+      "steps_over_expert": 1.069,
+      "outcomes": {
+        "success": 95,
+        "wrong_geometry": 5
+      }
+    },
+    "len3-L6": {
+      "episodes": 100,
+      "success": 0.92,
+      "clean_success": 0.55,
+      "zero_deviation_success": 0.49,
+      "clean_within_expert_plus_2": 0.2,
+      "mean_iou": 0.9446,
+      "on_policy_agreement": 0.8659,
+      "steps_over_expert": 1.062,
+      "outcomes": {
+        "success": 92,
+        "crashed": 5,
+        "wrong_geometry": 3
+      }
+    },
+    "overall_success": 0.9738,
+    "freecad_crashes": {
+      "raw": 79,
+      "recovered": 67
+    }
+  }
+}

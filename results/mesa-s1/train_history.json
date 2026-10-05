@@ -1,0 +1,162 @@
+{
+  "sft_best": {
+    "acc": 0.9986,
+    "epoch": 1,
+    "tag": "sft"
+  },
+  "dagger": [
+    {
+      "round": 0,
+      "beta": 0.0,
+      "rollout": {
+        "L1": {
+          "episodes": 402,
+          "success": 0.9975,
+          "clean_success": 0.9975,
+          "zero_deviation_success": 0.9975,
+          "clean_within_expert_plus_2": 0.7985,
+          "mean_iou": 1.0,
+          "on_policy_agreement": 0.9994,
+          "steps_over_expert": 0.968,
+          "outcomes": {
+            "success": 401,
+            "budget": 1
+          }
+        },
+        "L2": {
+          "episodes": 402,
+          "success": 0.9925,
+          "clean_success": 0.9826,
+          "zero_deviation_success": 0.9776,
+          "clean_within_expert_plus_2": 0.8184,
+          "mean_iou": 0.9999,
+          "on_policy_agreement": 0.9978,
+          "steps_over_expert": 0.9,
+          "outcomes": {
+            "success": 399,
+            "budget": 1,
+            "wrong_geometry": 2
+          }
+        },
+        "L3": {
+          "episodes": 402,
+          "success": 0.9751,
+          "clean_success": 0.7886,
+          "zero_deviation_success": 0.7761,
+          "clean_within_expert_plus_2": 0.6144,
+          "mean_iou": 0.9946,
+          "on_policy_agreement": 0.9573,
+          "steps_over_expert": 0.9,
+          "outcomes": {
+            "success": 392,
+            "wrong_geometry": 6,
+            "budget": 4
+          }
+        },
+        "overall_success": 0.9884
+      },
+      "added": 32110
+    },
+    {
+      "round": 1,
+      "beta": 0.0,
+      "rollout": {
+        "L1": {
+          "episodes": 402,
+          "success": 1.0,
+          "clean_success": 0.9975,
+          "zero_deviation_success": 0.995,
+          "clean_within_expert_plus_2": 0.7761,
+          "mean_iou": 1.0,
+          "on_policy_agreement": 0.9983,
+          "steps_over_expert": 0.988,
+          "outcomes": {
+            "success": 402
+          }
+        },
+        "L2": {
+          "episodes": 402,
+          "success": 0.995,
+          "clean_success": 0.9801,
+          "zero_deviation_success": 0.9726,
+          "clean_within_expert_plus_2": 0.8259,
+          "mean_iou": 0.9979,
+          "on_policy_agreement": 0.9972,
+          "steps_over_expert": 0.9,
+          "outcomes": {
+            "success": 400,
+            "wrong_geometry": 2
+          }
+        },
+        "L3": {
+          "episodes": 402,
+          "success": 0.9876,
+          "clean_success": 0.8383,
+          "zero_deviation_success": 0.8209,
+          "clean_within_expert_plus_2": 0.6343,
+          "mean_iou": 0.998,
+          "on_policy_agreement": 0.9655,
+          "steps_over_expert": 0.904,
+          "outcomes": {
+            "success": 397,
+            "wrong_geometry": 5
+          }
+        },
+        "overall_success": 0.9942
+      },
+      "added": 32127
+    },
+    {
+      "round": 2,
+      "beta": 0.0,
+      "rollout": {
+        "L1": {
+          "episodes": 402,
+          "success": 0.9975,
+          "clean_success": 0.9975,
+          "zero_deviation_success": 0.9925,
+          "clean_within_expert_plus_2": 0.7761,
+          "mean_iou": 0.9978,
+          "on_policy_agreement": 0.9975,
+          "steps_over_expert": 0.976,
+          "outcomes": {
+            "success": 401,
+            "wrong_geometry": 1
+          }
+        },
+        "L2": {
+          "episodes": 402,
+          "success": 0.9876,
+          "clean_success": 0.9751,
+          "zero_deviation_success": 0.9751,
+          "clean_within_expert_plus_2": 0.791,
+          "mean_iou": 0.9925,
+          "on_policy_agreement": 0.994,
+          "steps_over_expert": 0.905,
+          "outcomes": {
+            "success": 397,
+            "wrong_geometry": 4,
+            "budget": 1
+          }
+        },
+        "L3": {
+          "episodes": 402,
+          "success": 0.99,
+          "clean_success": 0.8134,
+          "zero_deviation_success": 0.796,
+          "clean_within_expert_plus_2": 0.6617,
+          "mean_iou": 0.9958,
+          "on_policy_agreement": 0.9614,
+          "steps_over_expert": 0.88,
+          "outcomes": {
+            "success": 398,
+            "wrong_geometry": 3,
+            "crashed": 1
+          }
+        },
+        "overall_success": 0.9917
+      },
+      "added": 31631
+    }
+  ]
+}

@@ -72,28 +72,39 @@ Also tried without gains: a progress-estimation head alone ([Ma et al. 2019](htt
 | `freecad_s1/runtime/` | FreeCAD runtime: headless and GUI sessions, snapshot, executors, the worker/client RPC and the GUI socket server |
 | `freecad_s1/datagen.py` | Synthetic data generation |
 | `freecad_s1/model/` | Featurization and the PyTorch model, plus `from_pretrained`/`save_pretrained` |
-| `freecad_s1/ui/` | UI-level variant (experimental): acts on FreeCAD's live widget tree, see [UI-level S1](#ui-level-s1-experimental) |
+| `freecad_s1/ui/` | Mesa-S1's runtime: acts on FreeCAD's live widget tree, see [Mesa-S1](#mesa-s1-the-same-model-operating-freecads-interface) |
+| `release/mesa-s1/` | Mesa-S1: weights, config, card, eval results |
 | `freecad_s1/train_sft.py`, `evaluate.py`, `rollout.py` | Training (SFT + DAgger), evaluation, closed-loop rollouts |
 | `scripts/` | Pipelines (`train_final.sh`, `final_eval.sh`, `chart_evals.sh`, `ablate.sh`), GUI demo, calibration |
 | `viz/` | Remotion project that renders the cover and charts from `results/` (`scripts/export_chart_data.py`, then `viz/render.sh`) |
 | `release/hf/` | The published model: weights, config, card, charts |
 
-## UI-level S1 (experimental)
+## Mesa-S1: the same model, operating FreeCAD's interface
 
-The released model picks FreeCAD commands, and the GUI runtime fills in their task dialogs behind the scenes. `freecad_s1/ui/` is the next step: the model acts on the interface itself, read from FreeCAD's live Qt widget tree.
+Taiga-S1 picks FreeCAD commands, and the GUI runtime fills in their task dialogs behind the scenes. **Mesa-S1** (`release/mesa-s1/`) does everything Taiga-S1 does, but through the interface itself: it clicks toolbar commands, types into dialog fields, picks dropdown entries, ticks check boxes and clicks OK, or Cancel when it opened the wrong dialog. Same architecture, same size (1.2M parameters, ~1 ms per decision).
 
-- **Elements, not commands.** Options are `cmd:PartDesign_Pad` (the toolbar's QAction), `set:lengthEdit`, `opt:changeMode=Through all`, `toggle:checkBoxReversed`, `click:OK` / `click:Cancel`, `wb:…` and `Done`. Interactions the widget tree cannot see (picking faces in the 3D view, sketch geometry and constraints) stay semantic `canvas:` actions for now.
-- **Same teacher.** The command-level expert still decides what to build; `ui/teacher.py` turns that into clicks: fill the fields that differ from their targets (in any order), then OK, or Cancel a dialog opened by mistake. Values typed into fields come from the parameter stage, as before; combo entries and check boxes are the model's choice.
-- **Same model.** UI models (`S1Config(ui=True)`, `train_sft --ui`) encode each element's role and live widget values (current number, selected entry, checked state). The released model is unaffected.
-- **Hidden GUI, with guard rails.** Every FreeCAD runs hidden (`open -g -j` on macOS, `xvfb-run` elsewhere) under a watchdog that kills it above a memory cap or time limit, and when the launcher exits (`ui/launch.py`).
+| Goal | Mesa-S1 | With 20% random actions | Taiga-S1 |
+|---|---|---|---|
+| Parts like the training set (levels 1–3) | 100% | 98–100% | 100% |
+| Feature combinations never seen in training | 100% | 98–100% | 90–100% |
+| 6–7 / 8–9 / 11 features | 100 / 99 / 99% | 97 / 95 / 92% | 100 / 100 / 100% |
+
+99.75% of 800 held-out parts built correctly through the GUI; the two failures were FreeCAD crashes, which the runtime otherwise recovers by restarting FreeCAD and replaying the episode (55 of 69 recovered). Full card: [`release/mesa-s1/README.md`](release/mesa-s1/README.md).
+
+How it works (`freecad_s1/ui/`):
+- **Elements, not commands.** The options are read from FreeCAD's live Qt widget tree: `cmd:PartDesign_Pad` (the toolbar's QAction), `set:lengthEdit`, `opt:changeMode=Through all`, `toggle:checkBoxReversed`, `click:OK` / `click:Cancel`, `wb:…` and `Done`, each with its live value. Interactions the widget tree cannot see (picking faces in the 3D view, sketch geometry and constraints) stay semantic `canvas:` actions.
+- **Same teacher.** The command-level expert decides what to build; `ui/teacher.py` turns that into clicks: fill the fields that differ from their targets (in any order), then OK, or Cancel a dialog opened by mistake. Numbers typed into fields come from the parameter stage, as in Taiga-S1, and each numeric field tells the model whether it already holds that value; dropdown entries, check boxes, OK/Cancel and Undo are the model's choice.
+- **Hidden GUI, with guard rails.** Every FreeCAD runs hidden (`open -g -j` on macOS, `xvfb-run` elsewhere) under a watchdog that kills it above a memory cap or time limit, and when the launcher exits (`ui/launch.py`). FreeCAD crashes are recovered by restart and replay (`ui/env.py`).
 
 ```bash
-python scripts/smoke_ui.py --n 2                       # teacher episodes through the real UI (all pass: 30/30, clean + noisy)
-python -m freecad_s1.ui.datagen --out data/ui_train --episodes 400 800 1200 --workers 2
-python -m freecad_s1.train_sft --ui --data data/ui_train --out runs/ui ...
+python scripts/smoke_ui.py --n 2                       # teacher episodes through the real UI
+python -m freecad_s1.ui.datagen --out data/ui_train --episodes 2000 4000 6000 --workers 3 --mem-gb 2.5
+scripts/train_mesa.sh                                   # Mesa-S1 recipe: 3 training stages (SFT + DAgger) + evaluation
+FREECAD_S1_REPO=$PWD FREECAD_S1_UI=1 /Applications/FreeCAD.app/Contents/MacOS/FreeCAD scripts/freecad_gui_server.FCMacro &
+python scripts/gui_demo.py --model release/mesa-s1     # watch it build a part
 ```
 
-A UI step takes ~60 ms (vs ~3 ms headless), so UI data is slower to generate.
+A UI step takes ~60 ms in FreeCAD (vs ~3 ms headless), so UI data is slower to generate: 12k episodes took ~8 h on 3 workers.
 
 ## Quick start
 

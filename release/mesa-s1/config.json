@@ -1,0 +1,33 @@
+{
+  "architecture": "S1Model",
+  "config": {
+    "width": 128,
+    "heads": 4,
+    "enc_layers": 3,
+    "dec_layers": 2,
+    "ff": 384,
+    "dropout": 0.1,
+    "id_dropout": 0.1,
+    "pos_mode": "rand",
+    "pos_table": 48,
+    "ordinal": true,
+    "ord_table": 12,
+    "progress_head": false,
+    "invariant_numerics": true,
+    "modular": true,
+    "pointer": "done",
+    "index_eval": "identity",
+    "type_dropout": 0.15,
+    "temperature": 1.0,
+    "ui": true,
+    "ui_recent_fields": true,
+    "ui_pending_feature": true,
+    "ui_param_match": true
+  },
+  "metadata": {
+    "name": "mesa-s1",
+    "version": "0.1.0",
+    "trained_on": "synthetic FreeCAD PartDesign episodes driven through the FreeCAD GUI (Qt widget tree)",
+    "base": "taiga-s1 architecture; SFT + DAgger on UI-level data (12k episodes, ~391k decisions + 3 DAgger rounds)"
+  }
+}

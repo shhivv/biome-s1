@@ -3,6 +3,9 @@
 1. Launch FreeCAD with the server macro:
      FREECAD_S1_REPO=$PWD /Applications/FreeCAD.app/Contents/MacOS/FreeCAD scripts/freecad_gui_server.FCMacro
 2. python scripts/gui_demo.py --model release/hf --level 3 --split iid --seed 7
+
+Mesa-S1 (UI level): launch FreeCAD with FREECAD_S1_UI=1 as well, then
+   python scripts/gui_demo.py --model release/mesa-s1 --level 3 --split iid --seed 7
 """
 import sys
 from pathlib import Path

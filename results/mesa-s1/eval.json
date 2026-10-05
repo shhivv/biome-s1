@@ -1,0 +1,305 @@
+{
+  "episodes": {
+    "comp-L3": {
+      "episodes": 100,
+      "success": 1.0,
+      "clean_success": 0.99,
+      "zero_deviation_success": 0.99,
+      "clean_within_expert_plus_2": 0.99,
+      "mean_iou": 1.0,
+      "on_policy_agreement": 0.9965,
+      "steps_over_expert": 0.751,
+      "outcomes": {
+        "success": 100
+      },
+      "by_rule": {
+        "mirrored_hole_std": {
+          "episodes": 51,
+          "success": 1.0,
+          "clean_success": 1.0,
+          "zero_deviation_success": 1.0,
+          "clean_within_expert_plus_2": 1.0
+        },
+        "pattern+boss_box": {
+          "episodes": 49,
+          "success": 1.0,
+          "clean_success": 0.9796,
+          "zero_deviation_success": 0.9796,
+          "clean_within_expert_plus_2": 0.9796
+        }
+      }
+    },
+    "comp2-L3": {
+      "episodes": 100,
+      "success": 1.0,
+      "clean_success": 1.0,
+      "zero_deviation_success": 1.0,
+      "clean_within_expert_plus_2": 1.0,
+      "mean_iou": 1.0,
+      "on_policy_agreement": 1.0,
+      "steps_over_expert": 0.725,
+      "outcomes": {
+        "success": 100
+      },
+      "by_rule": {
+        "mirrored_boss_box": {
+          "episodes": 100,
+          "success": 1.0,
+          "clean_success": 1.0,
+          "zero_deviation_success": 1.0,
+          "clean_within_expert_plus_2": 1.0
+        }
+      }
+    },
+    "iid-L1": {
+      "episodes": 100,
+      "success": 1.0,
+      "clean_success": 1.0,
+      "zero_deviation_success": 1.0,
+      "clean_within_expert_plus_2": 1.0,
+      "mean_iou": 1.0,
+      "on_policy_agreement": 1.0,
+      "steps_over_expert": 0.791,
+      "outcomes": {
+        "success": 100
+      }
+    },
+    "iid-L2": {
+      "episodes": 100,
+      "success": 1.0,
+      "clean_success": 1.0,
+      "zero_deviation_success": 1.0,
+      "clean_within_expert_plus_2": 1.0,
+      "mean_iou": 1.0,
+      "on_policy_agreement": 1.0,
+      "steps_over_expert": 0.742,
+      "outcomes": {
+        "success": 100
+      }
+    },
+    "iid-L3": {
+      "episodes": 100,
+      "success": 1.0,
+      "clean_success": 0.99,
+      "zero_deviation_success": 0.97,
+      "clean_within_expert_plus_2": 0.99,
+      "mean_iou": 1.0,
+      "on_policy_agreement": 0.9978,
+      "steps_over_expert": 0.75,
+      "outcomes": {
+        "success": 100
+      }
+    },
+    "len-L4": {
+      "episodes": 100,
+      "success": 1.0,
+      "clean_success": 0.97,
+      "zero_deviation_success": 0.94,
+      "clean_within_expert_plus_2": 0.97,
+      "mean_iou": 1.0,
+      "on_policy_agreement": 0.9965,
+      "steps_over_expert": 0.736,
+      "outcomes": {
+        "success": 100
+      }
+    },
+    "len2-L5": {
+      "episodes": 100,
+      "success": 0.99,
+      "clean_success": 0.99,
+      "zero_deviation_success": 0.97,
+      "clean_within_expert_plus_2": 0.99,
+      "mean_iou": 0.99,
+      "on_policy_agreement": 0.9997,
+      "steps_over_expert": 0.744,
+      "outcomes": {
+        "success": 99,
+        "crashed": 1
+      }
+    },
+    "len3-L6": {
+      "episodes": 100,
+      "success": 0.99,
+      "clean_success": 0.97,
+      "zero_deviation_success": 0.95,
+      "clean_within_expert_plus_2": 0.97,
+      "mean_iou": 0.99,
+      "on_policy_agreement": 0.9985,
+      "steps_over_expert": 0.739,
+      "outcomes": {
+        "success": 99,
+        "crashed": 1
+      }
+    },
+    "overall_success": 0.9975,
+    "freecad_crashes": {
+      "raw": 69,
+      "recovered": 55
+    },
+    "failures": [
+      {
+        "suite_level": "len2-L5",
+        "features": [
+          "base_box",
+          "boss_cyl",
+          "boss_cyl",
+          "mirror",
+          "hole",
+          "linear_pattern",
+          "hole",
+          "fillet_top"
+        ],
+        "outcome": "crashed",
+        "iou": 0.0,
+        "steps": 51,
+        "history": [
+          "canvas:Select:Plane:XY",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateRectangle",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainDistanceY",
+          "canvas:Sketcher_ConstrainDistanceX",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Pad",
+          "set:lengthEdit",
+          "click:OK",
+          "canvas:Select:Face+Z",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateCircle",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainDiameter",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Pad",
+          "set:lengthEdit",
+          "click:OK",
+          "canvas:Select:Face+Z",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateCircle",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainDiameter",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Pad",
+          "set:lengthEdit",
+          "click:OK",
+          "canvas:Select:Tip",
+          "cmd:PartDesign_Mirrored",
+          "opt:comboPlane=Base YZ-plane",
+          "click:OK",
+          "canvas:Select:Face+Z",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateCircle",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainDiameter",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Pocket",
+          "opt:changeMode=Through all",
+          "click:OK",
+          "canvas:Select:Tip",
+          "cmd:PartDesign_LinearPattern",
+          "set:spinExtent",
+          "opt:comboDirection=Base X-axis",
+          "set:spinOccurrences",
+          "click:OK",
+          "canvas:Select:Face+Z",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateCircle",
+          "canvas:Sketcher_ConstrainLock"
+        ]
+      },
+      {
+        "suite_level": "len3-L6",
+        "features": [
+          "base_hex",
+          "boss_cyl",
+          "hole_std",
+          "polar_pattern",
+          "hole_std",
+          "polar_pattern",
+          "hole_std",
+          "polar_pattern",
+          "hole",
+          "polar_pattern",
+          "fillet_top"
+        ],
+        "outcome": "crashed",
+        "iou": 0.0,
+        "steps": 73,
+        "history": [
+          "wb:PartDesignWorkbench",
+          "cmd:PartDesign_Body",
+          "canvas:Select:Plane:XY",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateHexagon",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainHorizontal",
+          "canvas:Sketcher_ConstrainDiameter",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Pad",
+          "set:lengthEdit",
+          "click:OK",
+          "canvas:Select:Face+Z",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateCircle",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainDiameter",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Pad",
+          "set:lengthEdit",
+          "click:OK",
+          "canvas:Select:Face+Z",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateCircle",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainDiameter",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Hole",
+          "opt:DepthType=Through all",
+          "set:Diameter",
+          "click:OK",
+          "canvas:Select:Tip",
+          "cmd:PartDesign_PolarPattern",
+          "set:spinOccurrences",
+          "opt:comboDirection=Base Z-axis",
+          "click:OK",
+          "canvas:Select:Face+Z",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateCircle",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainDiameter",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Hole",
+          "opt:DepthType=Through all",
+          "set:Diameter",
+          "click:OK",
+          "canvas:Select:Tip",
+          "cmd:PartDesign_PolarPattern",
+          "set:spinOccurrences",
+          "opt:comboDirection=Base Z-axis",
+          "click:OK",
+          "canvas:Select:Face+Z",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateCircle",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainDiameter",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Hole",
+          "opt:DepthType=Through all",
+          "set:Diameter",
+          "click:OK",
+          "canvas:Select:Tip",
+          "cmd:PartDesign_PolarPattern",
+          "set:spinOccurrences",
+          "opt:comboDirection=Base Z-axis",
+          "click:OK",
+          "canvas:Select:Face+Z",
+          "cmd:PartDesign_NewSketch",
+          "canvas:Sketcher_CreateCircle",
+          "canvas:Sketcher_ConstrainLock",
+          "canvas:Sketcher_ConstrainDiameter",
+          "cmd:Sketcher_LeaveSketch",
+          "cmd:PartDesign_Pocket"
+        ]
+      }
+    ]
+  }
+}
