@@ -66,6 +66,8 @@ What to pass in:
 - `goal`: the ordered feature list, plus a rough size of the finished part (bounding box, volume). Estimates are fine.
 - `elements`: the interface elements currently available, as returned by `UiSession.valid_actions()`.
 
+The returned probabilities are calibrated: a softmax temperature (T = 2.66, stored in `config.json`) was fitted on 16k on-policy states with 20% injected random actions, halving the calibration error (ECE 0.092 → 0.046). On those states, many of them mid-recovery, the model's top choice matches the teacher's 88.5% of the time; several recoveries are valid (e.g. Cancel vs. undoing a field change) but the teacher accepts only its own.
+
 To watch it build a part in the FreeCAD GUI (code: [github.com/shhivv/taiga](https://github.com/shhivv/taiga)):
 
 ```bash
