@@ -92,6 +92,14 @@ class Overlay(QtWidgets.QWidget):
             pen = QtGui.QPen(ACCENT, 3)
             if self.dashed:
                 pen.setStyle(QtCore.Qt.DashLine)
+            if not self.dashed:  # soft glow so the target catches the eye even when sped up
+                for width, alpha in ((16, 40), (9, 70)):
+                    glow = QtGui.QColor(ACCENT)
+                    glow.setAlpha(alpha)
+                    p.setPen(QtGui.QPen(glow, width))
+                    p.setBrush(QtCore.Qt.NoBrush)
+                    p.drawRoundedRect(r, 8, 8)
+            pen.setWidth(4)
             p.setPen(pen)
             p.setBrush(fill)
             p.drawRoundedRect(r, 7, 7)
@@ -102,8 +110,8 @@ class Overlay(QtWidgets.QWidget):
                 p.drawEllipse(c, 7, 7)
                 if self.pressed:
                     p.setBrush(QtCore.Qt.NoBrush)
-                    p.setPen(QtGui.QPen(ACCENT, 3))
-                    p.drawEllipse(c, 17, 17)
+                    p.setPen(QtGui.QPen(ACCENT, 4))
+                    p.drawEllipse(c, 22, 22)
         if self.caption:
             font = QtGui.QFont(self.font())
             font.setPixelSize(22)
@@ -144,6 +152,7 @@ class Recorder:
         self.timer.timeout.connect(self.grab)
         self.dir: Path | None = None
         self.n = 0
+        self.events: list[dict] = []  # frame ranges of each action (start, press, end) for editing
         self._view_img: QtGui.QImage | None = None
         self._view_t = 0.0
 
@@ -151,6 +160,7 @@ class Recorder:
         self.dir = Path(directory)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.n = 0
+        self.events = []
         self._view_img = None
         self.timer.start(int(1000 / fps))
 
@@ -232,7 +242,7 @@ class DemoUiSession(UiSession):
             self.recorder.start(req["dir"], int(req.get("fps", 15)))
             return {}
         if op == "record_stop":
-            return {"frames": self.recorder.stop()}
+            return {"frames": self.recorder.stop(), "events": self.recorder.events}
         if op == "demo_note":  # e.g. the model's decision time, shown in the caption
             self.overlay.note = req.get("text", "")
             return {}
@@ -311,11 +321,13 @@ class DemoUiSession(UiSession):
 
     def step(self, element: str) -> dict:
         widget, caption, dashed = self._locate(element)
+        event = {"element": element, "start": self.recorder.n}
         self.overlay.target(self._rect_of(widget), caption, dashed)
         _wait(self.dwell)
         if S.role(element) == "set" and widget is not None and self.pending is not None:
             self._type_visibly(widget, element)
         self.overlay.press()
+        event["press"] = self.recorder.n
         _wait(0.12)
         info = super().step(element)
         self.overlay.target(None, self.overlay.caption)  # the widget may be gone (dialog closed): keep only the caption
@@ -323,6 +335,8 @@ class DemoUiSession(UiSession):
             self._frame_part()  # cosmetic: keep the part in view for the recording
         _wait(self.after)
         self.overlay.clear()
+        event["end"] = self.recorder.n
+        self.recorder.events.append(event)
         return info
 
     def _session_view(self):

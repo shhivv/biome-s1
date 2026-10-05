@@ -86,7 +86,9 @@ def run_part(srv: Server, policy: Policy, name: str, reset: dict, out: Path, fps
     srv.call({"op": "demo_note", "text": ""})
     srv.call({"op": "demo_wait", "caption": f"{'Built' if ok else 'Finished'}: {steps} actions, IoU {sc['iou']:.3f}",
               "seconds": 2.5})
-    n = srv.call({"op": "record_stop"})["frames"]
+    stop = srv.call({"op": "record_stop"})
+    n = stop["frames"]
+    (frames / "events.json").write_text(json.dumps(stop["events"]))  # per-action frame ranges, for the teaser cut
     srv.call({"op": "save", "fcstd": str(out / f"{name}.FCStd"), "png": str(out / f"{name}.png"),
               "width": 1600, "height": 1600})
     video = out / f"{name}.mp4"
