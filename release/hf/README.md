@@ -18,6 +18,8 @@ tags:
 
 *Taiga-S1 is an experiment in whether small, fast decision models can be useful for computer-use agents: a planner decides what to do, and a tiny model handles the step-by-step execution. FreeCAD is the testbed. The next step is the same approach for applications without a scripting API, using the operating system's accessibility tree as the interface.*
 
+Taiga-S1 is part of the **Biome-S1** model family, with [Mesa-S1](https://huggingface.co/shhivv/mesa-s1), which works FreeCAD's buttons and dialogs itself. Code: [github.com/shhivv/biome-s1](https://github.com/shhivv/biome-s1).
+
 Taiga-S1 is the fast "System 1" layer for a CAD agent. You give it a goal, an ordered list of features like *"plate 40×30×10 → Ø6 hole at (10, 0) → polar pattern ×6 → fillet the top edges"*. It builds the part command by command: select a plane, sketch, draw, constrain, pad, pattern, fillet. At every step it reads FreeCAD's live state (feature tree, selection, sketch constraints, workbench) and picks the next command from the ones currently available.
 
 - **Tiny and fast.** 1.2M parameters, trained from scratch, ~1 ms per decision on a CPU. No LLM, no vision model, no screenshots.

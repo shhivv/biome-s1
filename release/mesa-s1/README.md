@@ -72,7 +72,7 @@ What to pass in:
 
 The returned probabilities are calibrated: a softmax temperature (T = 2.66, stored in `config.json`) was fitted on 16k on-policy states with 20% injected random actions, halving the calibration error (ECE 0.092 → 0.046). On those states, many of them mid-recovery, the model's top choice matches the teacher's 88.5% of the time; several recoveries are valid (e.g. Cancel vs. undoing a field change) but the teacher accepts only its own.
 
-To watch it build a part in the FreeCAD GUI (code: [github.com/shhivv/taiga](https://github.com/shhivv/taiga)):
+To watch it build a part in the FreeCAD GUI (code: [github.com/shhivv/biome-s1](https://github.com/shhivv/biome-s1)):
 
 ```bash
 FREECAD_S1_REPO=$PWD FREECAD_S1_UI=1 /Applications/FreeCAD.app/Contents/MacOS/FreeCAD scripts/freecad_gui_server.FCMacro &
@@ -89,7 +89,7 @@ python scripts/gui_demo.py --model release/mesa-s1 --level 3 --split iid --seed 
 - It covers FreeCAD PartDesign workflows: sketches (rectangle, circle, hexagon), pad, pocket, hole, revolve, linear and polar patterns, mirror, fillet, chamfer and shell.
 - Mesa-S1 chooses which element to act on. The numbers typed into fields come from the goal (a parameter stage), as in Taiga-S1, and each numeric field tells the model whether it already holds that value.
 - Picking faces and edges in the 3D view and drawing sketch geometry stay semantic actions (`canvas:…`), since the widget tree cannot see the 3D view.
-- The interface is read from FreeCAD's Qt widget tree from inside the application, and actions are applied to those widgets. Applications without a Python runtime would need the operating system's accessibility tree instead.
+- By default the interface is read from FreeCAD's Qt widget tree from inside the application, and actions are applied to those widgets. It also runs on the macOS accessibility tree, from outside the app: reading the interface that way, it built 15 of 15 test parts correctly; also clicking and typing through it (dropdown choices excepted), 14 of 15, the 15th lost to a FreeCAD crash (`scripts/mesa_ax.py` in the repo). The document state still comes from FreeCAD's API.
 
 ## Citation
 
