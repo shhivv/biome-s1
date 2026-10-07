@@ -76,6 +76,12 @@ class Worker:
                 out["iou"], out["delta_iou"] = value, value - self.last_iou
                 self.last_iou = value
             return out
+        if op == "ext_begin":  # an action the client performs from outside the app (UiSession.begin_external)
+            return {"request": s.begin_external(req["action"])}
+        if op == "observe":
+            return self.observe()
+        if op == "ext_end":
+            return {"info": s.end_external(), **self.observe()}
         if op == "score":
             return score(s, self.target)
         if op == "save":  # save the document (and, in the GUI, a screenshot)

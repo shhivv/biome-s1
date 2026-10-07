@@ -133,6 +133,7 @@ class UiSession(GuiSession):
         self.quiet_dialogs = os.environ.get("S1_QUIET_DIALOGS") == "1"
         self.pending: Pending | None = None
         self.messages: list[str] = []
+        self._external = None  # (generator, info) of an action being performed from outside
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -325,18 +326,106 @@ class UiSession(GuiSession):
             return out
         self.recent.append(element)
         try:
-            if role == "cmd":
-                self._open_dialog(command, info)
-            elif self.pending is None:
-                raise ActionError(f"{element}: no task dialog is open")
-            elif role in ("set", "opt", "toggle"):
-                self._edit_field(element)
-            elif element == S.OK:
-                self._accept(info)
-            elif element == S.CANCEL:
-                self._reject(info)
-            else:
-                raise ActionError(f"unknown element {element}")
+            gen = self._dialog_action(element, info)
+            request = next(gen)  # bookkeeping before the physical action
+            self._actuate(request)  # the action itself, through Qt
+            self._finish(gen)  # bookkeeping after it
+        except ActionError as exc:
+            info["error"] = str(exc)
+        self.settle()
+        return info
+
+    # -- actions performed from outside FreeCAD (scripts/mesa_ax.py) ----------------
+    #
+    # A dialog action is a generator: it does its "before" bookkeeping, yields one
+    # request describing the physical action, then does its "after" bookkeeping.
+    # step() performs the request through Qt; begin_external()/end_external() let
+    # a driver outside the app perform it instead (e.g. through the OS
+    # accessibility tree) while the session keeps its undo / dialog / plan state.
+
+    def _dialog_action(self, element: str, info: dict):
+        role = S.role(element)
+        if role == "cmd":
+            return self._open_dialog(S.underlying(element), info)
+        if self.pending is None:
+            raise ActionError(f"{element}: no task dialog is open")
+        if role in ("set", "opt", "toggle"):
+            return self._edit_field(element)
+        if element == S.OK:
+            return self._accept(info)
+        if element == S.CANCEL:
+            return self._reject(info)
+        raise ActionError(f"unknown element {element}")
+
+    @staticmethod
+    def _finish(gen) -> None:
+        try:
+            gen.send(None)
+        except StopIteration:
+            return
+        raise RuntimeError("a dialog action yielded more than once")
+
+    def _actuate(self, req: dict) -> None:
+        kind = req["kind"]
+        if kind == "command":
+            req["_action"].trigger()
+        elif kind == "number":
+            self._set_number(self._widget(req["field"]), req["value"], req["unit"])
+        elif kind == "choice":
+            w = self._widget(req["field"])
+            w.setCurrentIndex(w.findText(req["option"]))
+        elif kind == "toggle":
+            self._widget(req["field"]).click()
+        elif kind == "button":
+            self._button(req["button"]).click()
+        else:
+            raise ActionError(f"unknown request {kind}")
+
+    def _task_panel_out_of_overlay(self) -> None:
+        """FreeCAD 1.1 can show the task panel in an auto-hiding overlay dock. When an action is
+        performed from outside (e.g. a dropdown's popup takes focus), the overlay hides and the
+        dialog's widgets become invisible. Switch that dock side back to a normal dock, once."""
+        if getattr(self, "_overlay_checked", False):
+            return
+        self._overlay_checked = True
+        tv = self.task_view()
+        p = tv.parentWidget() if tv is not None else None
+        while p is not None:
+            name = p.objectName()
+            if "Overlay" in p.metaObject().className() and name.startswith("Overlay"):
+                side = name[len("Overlay"):]  # OverlayRight -> Right
+                if side in ("Left", "Right", "Top", "Bottom"):
+                    Gui.runCommand(f"Std_DockOverlayToggle{side}")
+                    pump(10)
+                return
+            p = p.parentWidget()
+
+    def begin_external(self, element: str) -> dict:
+        """Prepare a dialog action to be performed from outside the app. Returns
+        the request ({"kind": "command" | "number" | "choice" | "toggle" |
+        "button", ...}); {"internal": True} for elements the session performs
+        itself (workbench, canvas, commands without a dialog, Done)."""
+        role = S.role(element)
+        if role not in ("set", "opt", "toggle", "click") and not (role == "cmd" and S.underlying(element) in S.DIALOG_COMMANDS):
+            return {"internal": True}
+        self._task_panel_out_of_overlay()
+        info = {"changed": False, "error": None, "done": False, "on_plan": element in self.expert()}
+        self.recent.append(element)
+        try:
+            gen = self._dialog_action(element, info)
+            request = next(gen)
+        except ActionError as exc:
+            info["error"] = str(exc)
+            self.settle()
+            return {"error": str(exc), "info": info}
+        self._external = (gen, info)
+        return {k: v for k, v in request.items() if not k.startswith("_")}
+
+    def end_external(self) -> dict:
+        gen, info = self._external
+        self._external = None
+        try:
+            self._finish(gen)
         except ActionError as exc:
             info["error"] = str(exc)
         self.settle()
@@ -359,8 +448,8 @@ class UiSession(GuiSession):
         action = Gui.Command.get(command).getAction()[0]  # the toolbar button's QAction
         wait_until(action.isEnabled, timeout=2.0)  # FreeCAD refreshes enabled states on a timer
         with ModalGuard(pending.messages):
-            action.trigger()
-            wait_until(lambda: bool(Gui.Control.activeDialog()), timeout=2.0)
+            yield {"kind": "command", "command": command, "_action": action}
+            wait_until(lambda: bool(Gui.Control.activeDialog()), timeout=3.0)
         if not Gui.Control.activeDialog():
             created = [o.Name for o in self.doc.Objects if o.Name not in names_before]
             for _ in range(self.doc.UndoCount - pending.undo_before):
@@ -381,7 +470,9 @@ class UiSession(GuiSession):
         missing = [fl.name for fl in S.DIALOG_FIELDS.get(command, []) if self._widget(fl.name) is None]
         if missing or pending.feature is None:
             try:
-                self._reject({})
+                gen = self._reject({})
+                self._actuate(next(gen))
+                self._finish(gen)
             except ActionError:
                 self._close_dialog()
             raise ActionError(f"{command} opened an unexpected dialog (feature {pending.feature}, missing {missing})")
@@ -399,14 +490,30 @@ class UiSession(GuiSession):
                 value = p.targets.get(name)
                 if value is None:
                     value = S.fallback_number(fl.unit, self.goal.scale)
-                self._set_number(w, float(value), fl.unit)
+                value = float(value)
+                if fl.unit == "count" and not 1 <= value <= MAX_COUNT:
+                    raise ActionError(f"refusing count {value} (allowed 1..{MAX_COUNT})")
+                text = str(int(round(value))) if fl.unit == "count" else f"{value:g}"
+                yield {"kind": "number", "field": name, "value": value, "unit": fl.unit, "text": text}
+                pump(3)
+                got = self._read_number(self._widget(name))
+                if got is None or not S.value_matches(round(value) if fl.unit == "count" else value, got):
+                    raise ActionError(f"{element}: the field shows {got!r}, not {text}")
             elif fl.kind == "choice":
-                idx = w.findText(S.option_text(element))
-                if idx < 0:
+                option = S.option_text(element)
+                options = [w.itemText(i) for i in range(w.count())]
+                if option not in options:
                     raise ActionError(f"{element}: no such option")
-                w.setCurrentIndex(idx)
+                yield {"kind": "choice", "field": name, "option": option, "options": options,
+                       "current": w.currentText()}
+                wait_until(lambda: (self._widget(name) is not None
+                                    and self._widget(name).currentText() == option), timeout=2.0)
+                now = self._widget(name)
+                if now is None or now.currentText() != option:
+                    raise ActionError(f"{element}: the dropdown shows {None if now is None else now.currentText()!r}")
             else:
-                w.click()
+                yield {"kind": "toggle", "field": name}
+                pump(3)
 
     @staticmethod
     def _read_number(w) -> float | None:
@@ -449,8 +556,8 @@ class UiSession(GuiSession):
         if button is None:
             raise ActionError("no OK button")
         with ModalGuard(p.messages):
-            button.click()
-            wait_until(lambda: not Gui.Control.activeDialog(), timeout=2.0)
+            yield {"kind": "button", "button": "OK"}
+            wait_until(lambda: not Gui.Control.activeDialog(), timeout=3.0)
         if Gui.Control.activeDialog():  # FreeCAD refused: the dialog stays open
             p.on_plan = False  # only Cancel gets out of this now
             raise ActionError(f"OK refused: {p.messages[-1:] or 'dialog still open'}")
@@ -481,8 +588,8 @@ class UiSession(GuiSession):
         if button is None:
             raise ActionError("no Cancel button")
         with ModalGuard(p.messages):
-            button.click()
-            wait_until(lambda: not Gui.Control.activeDialog(), timeout=2.0)
+            yield {"kind": "button", "button": "Cancel"}
+            wait_until(lambda: not Gui.Control.activeDialog(), timeout=3.0)
         if Gui.Control.activeDialog():
             raise ActionError("Cancel did not close the dialog")
         self.pending = None

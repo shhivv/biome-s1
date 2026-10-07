@@ -147,3 +147,124 @@ def accessibility_view(snapshot: dict, state: State, actions: list[str]) -> tupl
     if lost:
         notes.append(f"enabled per session but not per accessibility: {lost}")
     return elements, state.ui, notes
+
+
+# ---------------------------------------------------------------------------------------------
+# Acting from outside the app
+#
+# What works on FreeCAD 1.1 (found by probing the Pad dialog):
+# - toolbar commands, check boxes, OK / Cancel: the accessibility "press" action;
+# - number fields: focus them through accessibility, then post select-all + the text + Tab
+#   as key events to the FreeCAD process (setting their AXValue is accepted but ignored);
+# - dropdowns: "press" opens the popup, then posted arrow keys + Return pick the entry (the
+#   entry order comes from the session). Don't read the popup's rows through accessibility:
+#   Qt crashes later when FreeCAD rebuilds the panel. Marking a row selected does not commit,
+#   and posted mouse clicks are ignored. Never post Escape (it cancels the task dialog) or
+#   Return outside a popup (it presses the dialog's default button, OK).
+# Posted events go to the process, not the screen: FreeCAD stays in the background and the
+# user's mouse and keyboard are untouched.
+
+_KEYCODES = {"a": 0, "0": 29, "1": 18, "2": 19, "3": 20, "4": 21, "5": 23, "6": 22, "7": 26, "8": 28, "9": 25,
+             ".": 47, "-": 27, "tab": 48, "return": 36, "down": 125, "up": 126}
+
+
+class AccessibilityActuator:
+    """Performs UiSession.begin_external() requests through accessibility + posted key events."""
+
+    def __init__(self, reader: AccessibilityReader, pid: int) -> None:
+        self.r = reader
+        self.AS = reader.AS
+        import Quartz  # pyobjc; macOS only
+
+        self.Q = Quartz
+        self.pid = pid
+
+    def _find(self, pred, skip_dialog: bool = False):
+        stack = list(self.r._attr(self.r.app, "AXWindows") or [])
+        while stack:
+            el = stack.pop()
+            if pred(el):
+                return el
+            role = str(self.r._attr(el, "AXRole") or "")
+            ident = str(self.r._attr(el, "AXIdentifier") or "")
+            if role in SKIP_ROLES or "Tree" in ident or (skip_dialog and ".Tasks." in ident):
+                continue
+            stack.extend(self.r._attr(el, "AXChildren") or [])
+        return None
+
+    def _field(self, name: str):
+        return self._find(lambda e: str(self.r._attr(e, "AXIdentifier") or "").endswith("." + name))
+
+    def _key(self, name: str, command: bool = False) -> None:
+        for down in (True, False):
+            ev = self.Q.CGEventCreateKeyboardEvent(None, _KEYCODES[name], down)
+            if command:
+                self.Q.CGEventSetFlags(ev, self.Q.kCGEventFlagMaskCommand)
+            self.Q.CGEventPostToPid(self.pid, ev)
+            time.sleep(0.02)
+
+    def _press(self, el, what: str) -> None:
+        if el is None:
+            raise RuntimeError(f"accessibility: {what} not found")
+        err = self.AS.AXUIElementPerformAction(el, "AXPress")
+        if err != 0:
+            raise RuntimeError(f"accessibility: pressing {what} failed ({err})")
+
+    def perform(self, req: dict) -> None:
+        kind = req["kind"]
+        if kind == "command":
+            cmd = req["command"]
+            el = self._find(lambda e: str(self.r._attr(e, "AXHelp") or "") == cmd
+                            and str(self.r._attr(e, "AXRole")) in ("AXButton", "AXMenuButton"), skip_dialog=True)
+            self._press(el, f"toolbar button {cmd}")
+        elif kind == "button":
+            el = self._find(lambda e: str(self.r._attr(e, "AXRole")) == "AXButton"
+                            and str(self.r._attr(e, "AXTitle")) == req["button"]
+                            and ".Tasks." in str(self.r._attr(e, "AXIdentifier") or ""))
+            self._press(el, f"dialog button {req['button']}")
+        elif kind == "toggle":
+            self._press(self._field(req["field"]), f"check box {req['field']}")
+        elif kind == "number":
+            el = self._field(req["field"])
+            if el is None:
+                raise RuntimeError(f"accessibility: field {req['field']} not found")
+            self.AS.AXUIElementSetAttributeValue(el, "AXFocused", True)
+            time.sleep(0.15)
+            self._key("a", command=True)
+            for ch in req["text"]:
+                self._key(ch)
+            self._key("tab")  # commits the value (Return would press the dialog's OK)
+            time.sleep(0.2)
+        elif kind == "choice":
+            el = self._field(req["field"])
+            if el is None:
+                raise RuntimeError(f"accessibility: dropdown {req['field']} not found")
+            import threading
+
+            def popup_open() -> bool:  # the popup's list appears as a child of the dropdown (its rows are not read)
+                return any(str(self.r._attr(c, "AXRole")) == "AXList" for c in self.r._attr(el, "AXChildren") or [])
+
+            threading.Thread(target=lambda: self.AS.AXUIElementPerformAction(el, "AXPress"), daemon=True).start()
+            deadline = time.time() + 3.0
+            while not popup_open() and time.time() < deadline:
+                time.sleep(0.05)
+            if not popup_open():
+                raise RuntimeError(f"accessibility: the {req['field']} popup did not open")
+            time.sleep(0.15)
+            # The entry order comes from the session (req["options"]); the popup's rows are never read:
+            # touching them through accessibility makes Qt crash when FreeCAD rebuilds the panel afterwards.
+            options = req["options"]
+            if req["option"] not in options:
+                raise RuntimeError(f"accessibility: {req['option']!r} not among {options}")
+            delta = options.index(req["option"]) - (options.index(req["current"]) if req["current"] in options else 0)
+            for _ in range(abs(delta)):
+                self._key("down" if delta > 0 else "up")
+                time.sleep(0.04)
+            self._key("return")  # inside the open popup: picks the highlighted entry
+            deadline = time.time() + 2.0
+            while popup_open() and time.time() < deadline:
+                time.sleep(0.05)
+            if popup_open():
+                raise RuntimeError(f"accessibility: the {req['field']} popup stayed open")
+        else:
+            raise RuntimeError(f"unknown request {kind}")

@@ -27,7 +27,7 @@ from freecad_s1.model.net import from_pretrained, load_checkpoint
 from freecad_s1.rollout import Policy
 from freecad_s1.runtime.fcenv import PROTOCOL_PREFIX
 from freecad_s1.schema import Goal, State
-from freecad_s1.ui.ax import AccessibilityReader, accessibility_view
+from freecad_s1.ui.ax import AccessibilityActuator, AccessibilityReader, accessibility_view
 from freecad_s1.ui.launch import find_pids, launch_gui_script
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,7 +64,24 @@ def launch(port: int, mem_gb: float):
     pid = next(p for p in find_pids(str(script))
                if "bin/freecad" in subprocess.run(["ps", "-o", "command=", "-p", str(p)], capture_output=True,
                                                   text=True).stdout.lower())
-    return proc, srv, AccessibilityReader(pid)
+    reader = AccessibilityReader(pid)
+    return proc, srv, reader, AccessibilityActuator(reader, pid)
+
+
+def step(srv: Server, actuator: AccessibilityActuator, action: str, stats: dict) -> dict:
+    """Perform `action` from outside: the session prepares and books it, accessibility performs it."""
+    req = srv.call({"op": "ext_begin", "action": action})["request"]
+    if req.get("internal"):  # workbench, canvas, commands without a dialog, Done
+        return srv.call({"op": "step", "action": action})
+    if "error" in req:
+        return {"info": req["info"], **srv.call({"op": "observe"})}
+    try:
+        actuator.perform(req)
+        stats["acted_via_accessibility"] += 1
+    except RuntimeError as exc:
+        key = re.sub(r"\d+(\.\d+)?", "#", str(exc))[:90]
+        stats["actuation_errors"][key] = stats["actuation_errors"].get(key, 0) + 1
+    return srv.call({"op": "ext_end"})
 
 
 def main() -> None:
@@ -79,6 +96,10 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8897)
     ap.add_argument("--mem-gb", type=float, default=2.5)
     ap.add_argument("--out", default="runs/mesa_ax.json")
+    ap.add_argument("--log", help="append each action here before performing it (locates a crash)")
+    ap.add_argument("--act", action="store_true",
+                    help="also perform dialog actions (toolbar commands, fields, dropdowns, check boxes, OK/Cancel) "
+                         "through accessibility + posted key events, not by the session")
     args = ap.parse_args()
 
     model = load_checkpoint(args.model) if args.model.endswith(".pt") else from_pretrained(args.model)
@@ -89,8 +110,9 @@ def main() -> None:
     else:
         jobs = [{"op": "reset", "level": args.level, "split": args.split, "seed": args.seed + k}
                 for k in range(args.episodes)]
-    proc, srv, reader = launch(args.port, args.mem_gb)
-    stats = {"steps": 0, "same_elements": 0, "same_decision": 0, "read_ms": [], "notes": {}, "episodes": []}
+    proc, srv, reader, actuator = launch(args.port, args.mem_gb)
+    stats = {"steps": 0, "same_elements": 0, "same_decision": 0, "read_ms": [], "notes": {}, "episodes": [],
+             "acted_via_accessibility": 0, "actuation_errors": {}}
     try:
         for k, job in enumerate(jobs):
             try:
@@ -110,7 +132,13 @@ def main() -> None:
                     stats["steps"] += 1
                     stats["same_elements"] += int(set(elements) == set(actions))
                     stats["same_decision"] += int(action == policy.act([state], [goal], [actions])[0])
-                    s = srv.call({"op": "step", "action": action})
+                    if args.log:
+                        with open(args.log, "a") as fh:
+                            fh.write(f"episode {k} step {steps}: {action}\n")
+                    s = step(srv, actuator, action, stats) if args.act else srv.call({"op": "step", "action": action})
+                    if args.log and s["info"].get("error"):
+                        with open(args.log, "a") as fh:
+                            fh.write(f"    -> error: {s['info']['error']}\n")
                     steps += 1
                     if s["info"]["done"]:
                         done = True
@@ -123,7 +151,7 @@ def main() -> None:
                 ep = {"episode": k, "success": False, "crashed": repr(exc)[:80]}
                 proc.kill("crashed")
                 time.sleep(2)
-                proc, srv, reader = launch(args.port, args.mem_gb)
+                proc, srv, reader, actuator = launch(args.port, args.mem_gb)
             stats["episodes"].append(ep)
             print(json.dumps(ep), flush=True)
         try:
@@ -137,6 +165,8 @@ def main() -> None:
               "crashes": sum(1 for e in stats["episodes"] if "crashed" in e), "steps": stats["steps"],
               "same_element_list": stats["same_elements"], "same_decision_as_session_view": stats["same_decision"],
               "accessibility_read_ms_median": round(ms[len(ms) // 2]) if ms else None,
+              "acted_via_accessibility": stats["acted_via_accessibility"],
+              "actuation_errors": stats["actuation_errors"],
               "disagreements": dict(sorted(stats["notes"].items(), key=lambda kv: -kv[1])[:10]),
               "detail": stats["episodes"]}
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
