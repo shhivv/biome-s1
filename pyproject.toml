@@ -7,7 +7,11 @@ dependencies = ["torch>=2.3", "numpy", "safetensors", "huggingface_hub"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
-ax = ["pyobjc-framework-ApplicationServices; sys_platform == 'darwin'"]  # scripts/mesa_ax.py
+ax = [  # scripts/mesa_ax.py (accessibility, posted keys; --hands also: window capture, OCR, real mouse)
+    "pyobjc-framework-ApplicationServices; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz; sys_platform == 'darwin'",
+    "pyobjc-framework-Vision; sys_platform == 'darwin'",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
