@@ -74,8 +74,8 @@ const Cursor: React.FC<{i: number; tx: number; ty: number; z: number}> = ({i, tx
   );
 };
 
-const VIEW_W = 1760;
-const VIEW_H = 990; // the recorded window is 16:9
+const VIEW_W = 1700;
+const VIEW_H = 956; // the recorded window is 16:9
 
 const Build: React.FC = () => {
   const f = useCurrentFrame();
@@ -91,7 +91,7 @@ const Build: React.FC = () => {
   const ty = clamp(VIEW_H / 2 - fy * VIEW_H * z, VIEW_H - VIEW_H * z, 0);
   return (
     <AbsoluteFill style={{opacity: op, alignItems: "center", justifyContent: "center"}}>
-      <div style={{position: "absolute", top: 24, left: 80, right: 80, display: "flex", justifyContent: "space-between",
+      <div style={{position: "absolute", top: 22, left: 110, right: 110, display: "flex", justifyContent: "space-between",
         alignItems: "center", fontSize: 22, fontWeight: 600, letterSpacing: 3, color: INK2}}>
         <span>LIVE IN FREECAD · EVERY CLICK IS THE MODEL'S</span>
         <span style={{display: "flex", alignItems: "center", gap: 18}}>
@@ -101,7 +101,7 @@ const Build: React.FC = () => {
             <span style={{color: ACCENT}}>{element === "Done" ? "Done" : `action ${actionNo}`}</span> / {SPEC.actions}</span>
         </span>
       </div>
-      <div style={{width: VIEW_W, height: VIEW_H, marginTop: 44, borderRadius: 14, overflow: "hidden", position: "relative",
+      <div style={{width: VIEW_W, height: VIEW_H, marginTop: 62, borderRadius: 14, overflow: "hidden", position: "relative",
         border: "1px solid rgba(0,0,0,0.12)", boxShadow: "0 30px 70px rgba(0,0,0,0.18), 0 8px 18px rgba(0,0,0,0.10)"}}>
         <Img src={staticFile(SPEC.frames[i])}
           style={{position: "absolute", left: 0, top: 0, width: VIEW_W, height: VIEW_H, transformOrigin: "0 0",
