@@ -34,7 +34,7 @@ def main() -> None:
     ap.add_argument("--frames", type=int, default=225, help="teaser frames for the build (30 fps)")
     ap.add_argument("--width", type=int, default=2400, help="frame width (zoomed shots need resolution)")
     ap.add_argument("--zoom", type=float, default=1.3, help="push-in on interface widgets")
-    ap.add_argument("--ease", type=float, default=0.08, help="camera smoothing per frame")
+    ap.add_argument("--ease", type=float, default=0.14, help="camera smoothing per frame")
     args = ap.parse_args()
 
     src = ROOT / args.recording / "frames" / args.part
@@ -46,7 +46,8 @@ def main() -> None:
 
     picks, labels, captions, notes, targets, cursor_targets, pressed = [], [], [], [], [], [], []
     for e, k in zip(events, alloc):
-        lo, hi = e["start"], max(e["start"], e["end"] - 1)
+        # only the highlighted part (highlight -> press); the result shows as the next action begins
+        lo, hi = e["start"], max(e["start"], min(e["end"] - 1, e.get("press", e["end"])))
         r = e.get("rect")
         widget = r is not None and not e.get("dashed")
         # push in on interface widgets so the click reads on a phone; ease out for 3D-view steps

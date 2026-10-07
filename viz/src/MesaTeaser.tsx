@@ -42,38 +42,6 @@ const Title: React.FC = () => {
   );
 };
 
-// macOS-style pointer, drawn as a vector so it stays crisp at any zoom; ripple on each click
-const Cursor: React.FC<{i: number; tx: number; ty: number; z: number}> = ({i, tx, ty, z}) => {
-  const [cx, cy] = SPEC.cursor[i];
-  const x = tx + cx * VIEW_W * z;
-  const y = ty + cy * VIEW_H * z;
-  const click = [...SPEC.clicks].reverse().find((c) => c <= i);
-  const since = click === undefined ? 99 : i - click;
-  const p = Math.min(1, since / 12);
-  const pressScale = since < 4 ? 0.86 + 0.035 * since : 1;
-  return (
-    <>
-      {since < 12 && (
-        <div style={{position: "absolute", left: x - (14 + 40 * p), top: y - (14 + 40 * p), width: 2 * (14 + 40 * p),
-          height: 2 * (14 + 40 * p), borderRadius: "50%", border: `${4 - 2 * p}px solid ${ACCENT}`,
-          background: `rgba(42,120,214,${0.18 * (1 - p)})`, opacity: 1 - p}} />
-      )}
-      {/* named cursor, multiplayer-style: rounded accent arrow with a white rim, plus a "Mesa-S1" tag */}
-      <svg width={44} height={56} viewBox="0 0 28 36"
-        style={{position: "absolute", left: x - 7, top: y - 4, transform: `scale(${pressScale})`, transformOrigin: "7px 4px",
-          filter: "drop-shadow(0 8px 14px rgba(10,40,90,0.30)) drop-shadow(0 2px 3px rgba(0,0,0,0.25))"}}>
-        <path d="M5.5 4.2 C5.5 3.1 6.7 2.5 7.6 3.2 L24.3 17.3 C25.2 18.1 24.7 19.5 23.5 19.6 L16.4 20.2 L20.3 28.9 C20.7 29.8 20.3 30.8 19.4 31.2 L17.2 32.2 C16.3 32.6 15.3 32.2 14.9 31.3 L11.1 22.6 L7.4 27.4 C6.7 28.3 5.5 27.8 5.5 26.7 Z"
-          fill={ACCENT} stroke="#fff" strokeWidth={2.2} strokeLinejoin="round" />
-      </svg>
-      <div style={{position: "absolute", top: y + 34, padding: "6px 14px", borderRadius: 999,
-        ...(x > VIEW_W - 200 ? {right: VIEW_W - x + 8} : {left: x + 26}),  // flip the tag near the right edge
-        background: ACCENT, color: "#fff", fontSize: 21, fontWeight: 700, letterSpacing: 0.3, whiteSpace: "nowrap",
-        transform: `scale(${pressScale})`, transformOrigin: x > VIEW_W - 200 ? "100% 0" : "0 0",
-        boxShadow: "0 8px 18px rgba(10,40,90,0.28), 0 0 0 2px #fff"}}>Mesa-S1</div>
-    </>
-  );
-};
-
 const VIEW_W = 1700;
 const VIEW_H = 956; // the recorded window is 16:9
 
@@ -93,7 +61,7 @@ const Build: React.FC = () => {
     <AbsoluteFill style={{opacity: op, alignItems: "center", justifyContent: "center"}}>
       <div style={{position: "absolute", top: 22, left: 110, right: 110, display: "flex", justifyContent: "space-between",
         alignItems: "center", fontSize: 22, fontWeight: 600, letterSpacing: 3, color: INK2}}>
-        <span>LIVE IN FREECAD · EVERY CLICK IS THE MODEL'S</span>
+        <span>LIVE IN FREECAD · <span style={{color: ACCENT}}>HIGHLIGHT</span> = THE ELEMENT THE MODEL CHOSE</span>
         <span style={{display: "flex", alignItems: "center", gap: 18}}>
           <span style={{padding: "7px 16px", borderRadius: 999, background: INK, color: "#fff", fontSize: 20,
             letterSpacing: 1, fontWeight: 600}}>SLOWED DOWN {SPEC.slowdown}× · REAL RUN {SPEC.run_s} S</span>
@@ -106,7 +74,6 @@ const Build: React.FC = () => {
         <Img src={staticFile(SPEC.frames[i])}
           style={{position: "absolute", left: 0, top: 0, width: VIEW_W, height: VIEW_H, transformOrigin: "0 0",
             transform: `translate(${tx}px, ${ty}px) scale(${z})`}} />
-        <Cursor i={i} tx={tx} ty={ty} z={z} />
         {/* caption: the element the model chose, verbatim (drawn here so the zoom never crops it) */}
         <div style={{position: "absolute", bottom: 30, left: 0, right: 0, display: "flex", justifyContent: "center"}}>
           <div style={{display: "flex", gap: 20, alignItems: "baseline", padding: "16px 30px", borderRadius: 999,
