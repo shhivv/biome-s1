@@ -45,7 +45,10 @@ class SocketEnv:
         return resp
 
 
-def main() -> None:
+def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="release/hf")
     ap.add_argument("--level", type=int, default=3)
@@ -83,7 +86,8 @@ def main() -> None:
         ok = action in expert
         agree += ok
         steps += 1
-        print(f"{steps:3d}  {action:34s} {'✓' if ok else '✗ expert: ' + expert[0]}  ({ms:.1f} ms, {len(actions)} valid)")
+        status = "OK" if ok else "MISS expert: " + expert[0]
+        print(f"{steps:3d}  {action:34s} {status}  ({ms:.1f} ms, {len(actions)} valid)")
         s = env.call({"op": "step", "action": action})
         if args.frames_dir:
             cam = json.loads(Path(args.camera_from).read_text())["camera"]
@@ -112,7 +116,8 @@ def main() -> None:
     print("saved:", saved.get("fcstd"), saved.get("png"))
     if saved.get("camera"):
         (out / f"{tag}.camera.json").write_text(json.dumps({"camera": saved["camera"]}))
+    return 0 if success else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
