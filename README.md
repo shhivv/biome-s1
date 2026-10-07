@@ -2,7 +2,7 @@
 
 ![Biome-S1: parts the models built in FreeCAD](assets/cover.png)
 
-[![Mesa-S1 operating FreeCAD's interface: every click is the model's (10 s)](release/mesa-s1/assets/poster.jpg)](release/mesa-s1/assets/teaser.mp4)
+[![Mesa-S1 operating FreeCAD's interface; the highlight is the element the model chose (10 s)](release/mesa-s1/assets/poster.jpg)](release/mesa-s1/assets/teaser.mp4)
 
 **A family of tiny, fast "System 1" models for computer-use agents.**
 
