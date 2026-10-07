@@ -58,12 +58,18 @@ const Cursor: React.FC<{i: number; tx: number; ty: number; z: number}> = ({i, tx
           height: 2 * (14 + 40 * p), borderRadius: "50%", border: `${4 - 2 * p}px solid ${ACCENT}`,
           background: `rgba(42,120,214,${0.18 * (1 - p)})`, opacity: 1 - p}} />
       )}
-      <svg width={50} height={67} viewBox="0 0 24 32"
-        style={{position: "absolute", left: x - 3, top: y - 3, transform: `scale(${pressScale})`, transformOrigin: "3px 3px",
-          filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.35)) drop-shadow(0 1px 2px rgba(0,0,0,0.4))"}}>
-        <path d="M2.5 2.2 L2.5 25.2 L8.4 19.5 L12.5 28.9 L16.3 27.2 L12.3 18.1 L20.4 18.1 Z"
-          fill="#111" stroke="#fff" strokeWidth={1.8} strokeLinejoin="round" />
+      {/* named cursor, multiplayer-style: rounded accent arrow with a white rim, plus a "Mesa-S1" tag */}
+      <svg width={44} height={56} viewBox="0 0 28 36"
+        style={{position: "absolute", left: x - 7, top: y - 4, transform: `scale(${pressScale})`, transformOrigin: "7px 4px",
+          filter: "drop-shadow(0 8px 14px rgba(10,40,90,0.30)) drop-shadow(0 2px 3px rgba(0,0,0,0.25))"}}>
+        <path d="M5.5 4.2 C5.5 3.1 6.7 2.5 7.6 3.2 L24.3 17.3 C25.2 18.1 24.7 19.5 23.5 19.6 L16.4 20.2 L20.3 28.9 C20.7 29.8 20.3 30.8 19.4 31.2 L17.2 32.2 C16.3 32.6 15.3 32.2 14.9 31.3 L11.1 22.6 L7.4 27.4 C6.7 28.3 5.5 27.8 5.5 26.7 Z"
+          fill={ACCENT} stroke="#fff" strokeWidth={2.2} strokeLinejoin="round" />
       </svg>
+      <div style={{position: "absolute", top: y + 34, padding: "6px 14px", borderRadius: 999,
+        ...(x > VIEW_W - 200 ? {right: VIEW_W - x + 8} : {left: x + 26}),  // flip the tag near the right edge
+        background: ACCENT, color: "#fff", fontSize: 21, fontWeight: 700, letterSpacing: 0.3, whiteSpace: "nowrap",
+        transform: `scale(${pressScale})`, transformOrigin: x > VIEW_W - 200 ? "100% 0" : "0 0",
+        boxShadow: "0 8px 18px rgba(10,40,90,0.28), 0 0 0 2px #fff"}}>Mesa-S1</div>
     </>
   );
 };

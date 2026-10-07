@@ -33,8 +33,8 @@ def main() -> None:
     ap.add_argument("--recording", default="runs/mesa_demo")
     ap.add_argument("--frames", type=int, default=225, help="teaser frames for the build (30 fps)")
     ap.add_argument("--width", type=int, default=2400, help="frame width (zoomed shots need resolution)")
-    ap.add_argument("--zoom", type=float, default=1.8, help="push-in on interface widgets")
-    ap.add_argument("--ease", type=float, default=0.16, help="camera smoothing per frame")
+    ap.add_argument("--zoom", type=float, default=1.3, help="push-in on interface widgets")
+    ap.add_argument("--ease", type=float, default=0.08, help="camera smoothing per frame")
     args = ap.parse_args()
 
     src = ROOT / args.recording / "frames" / args.part
@@ -74,7 +74,7 @@ def main() -> None:
     for e, k in zip(events, alloc):
         tgt = cursor_targets[i]
         sx, sy = cx, cy
-        glide = max(1, min(k - 1, round(k * 0.45)))
+        glide = max(1, min(k - 1, round(k * 0.3)))  # arrive well before the press
         for j in range(k):
             if tgt is not None:
                 u = min(1.0, (j + 1) / glide)
