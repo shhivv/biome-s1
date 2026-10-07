@@ -211,3 +211,29 @@ def test_param_match_flags_numeric_fields_against_parameter_stage():
     ext = ui_vector("set:spinExtent", ui, 40.0, param_match=True)
     assert occ[6:] == [0.0, 1.0] and ext[6:] == [1.0, 1.0]
     assert ui_vector("set:spinOccurrences", ui, 40.0)[6:] == [0.0, 0.0]  # off unless the model uses it
+
+
+def test_accessibility_view_rebuilds_mesa_inputs():
+    from freecad_s1.schema import ShapeInfo, State
+    from freecad_s1.ui.ax import accessibility_view
+
+    # no dialog: toolbar commands come from accessibility, canvas / Done stay from the session
+    state = State(doc_open=True, workbench="PartDesignWorkbench", shape=ShapeInfo())
+    actions = ["cmd:PartDesign_Body", "cmd:Std_ViewFitAll", "canvas:Select:Plane:XY", "Done"]
+    snap = {"commands": {"PartDesign_Body": True, "Std_ViewFitAll": False, "PartDesign_Fillet": True},
+            "fields": {}, "dialog_buttons": {}}
+    els, ui, notes = accessibility_view(snap, state, actions)
+    assert els == ["cmd:PartDesign_Body", "canvas:Select:Plane:XY", "Done"]  # Fillet: enabled in the GUI, not an option
+    assert notes and "Std_ViewFitAll" in notes[0]
+    # a dialog: field values from accessibility, options / targets from the session
+    state.ui = _pocket_ui(length=5.0)
+    state.ui["fields"]["lengthEdit"]["target"] = 3.0
+    snap = {"commands": {}, "dialog_buttons": {"OK": True, "Cancel": True}, "fields": {
+        "sidesMode": {"role": "AXMenuButton", "title": "One sided", "value": None, "text": None, "enabled": True},
+        "changeMode": {"role": "AXMenuButton", "title": "Dimension", "value": None, "text": None, "enabled": True},
+        "lengthEdit": {"role": "AXIncrementor", "title": None, "value": None, "text": "5.00 mm", "enabled": True},
+        "checkBoxReversed": {"role": "AXCheckBox", "title": "Reversed", "value": 0, "text": None, "enabled": True}}}
+    els, ui, notes = accessibility_view(snap, state, [])
+    assert ui["fields"]["lengthEdit"]["value"] == 5.0 and ui["fields"]["lengthEdit"]["target"] == 3.0
+    assert ui["fields"]["checkBoxReversed"]["value"] is False and notes == []
+    assert "set:lengthEdit" in els and "click:OK" in els

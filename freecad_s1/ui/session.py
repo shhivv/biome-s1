@@ -39,7 +39,7 @@ import FreeCAD as App
 import FreeCADGui as Gui
 from PySide import QtCore, QtWidgets
 
-from ..actions import PROFILE_FEATURES, SOLID_FEATURE_TYPES
+from ..actions import CATALOGUE, PROFILE_FEATURES, SOLID_FEATURE_TYPES
 from ..expert import Meta, ObjMeta, progress
 from ..goals import StartSpec
 from ..runtime.gui_session import GuiSession
@@ -143,6 +143,7 @@ class UiSession(GuiSession):
     def reset(self, goal: Goal, start: StartSpec | None = None) -> None:
         self._close_dialog()
         super().reset(goal, start)
+        self.settle()
 
     def _gui_in_edit(self) -> str | None:
         gdoc = Gui.ActiveDocument
@@ -178,8 +179,28 @@ class UiSession(GuiSession):
         want = self.pending.feature if self.pending is not None else self.meta.edit
         ok = wait_until(lambda: self._gui_in_edit() == want
                         and (want is not None or not Gui.Control.activeDialog()))
+        self.refresh_commands()
         pump(2)
         return ok
+
+    def refresh_commands(self) -> None:
+        """Bring toolbar buttons' enabled states up to date now. FreeCAD only
+        refreshes them on a timer, so anything reading the interface from
+        outside (the OS accessibility tree) would otherwise see stale states."""
+        update = getattr(Gui, "updateCommands", None)
+        if update is not None:
+            update()
+        # FreeCAD's own refresh may not run for a background window: set each catalogue command's
+        # actions from isCommandActive, as FreeCAD's timer would
+        for name in CATALOGUE:
+            cmd = name.split(":", 1)[0]
+            try:
+                actions = Gui.Command.get(cmd).getAction()
+            except Exception:
+                continue
+            active = Gui.isCommandActive(cmd)
+            for a in actions or []:
+                a.setEnabled(active)
 
     def _absorb_gui_transactions(self) -> None:
         """The GUI sometimes commits a transaction of its own after an action

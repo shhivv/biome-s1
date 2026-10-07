@@ -7,6 +7,7 @@ dependencies = ["torch>=2.3", "numpy", "safetensors", "huggingface_hub"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+ax = ["pyobjc-framework-ApplicationServices; sys_platform == 'darwin'"]  # scripts/mesa_ax.py
 
 [build-system]
 requires = ["setuptools>=68"]
