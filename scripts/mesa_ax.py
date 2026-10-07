@@ -103,17 +103,22 @@ def step(srv: Server, actuator: AccessibilityActuator, action: str, stats: dict,
     3D view and model tree are made with the real mouse too."""
     req = srv.call({"op": "ext_begin", "action": action, "inside": list(inside), "canvas": hands is not None})["request"]
     if req.get("kind") == "pick":
-        t = time.time()
+        t, h0, problem = time.time(), hands.hovers, None
         try:
             hands.perform(req["target"])
             stats["picked_with_mouse"] = stats.get("picked_with_mouse", 0) + 1
         except RuntimeError as exc:
-            key = re.sub(r"\d+(\.\d+)?", "#", str(exc))[:90]
+            problem = str(exc)
+            key = re.sub(r"\d+(\.\d+)?", "#", problem)[:90]
             stats["actuation_errors"][key] = stats["actuation_errors"].get(key, 0) + 1
         stats.setdefault("pick_seconds", []).append(time.time() - t)
         out = srv.call({"op": "ext_end"})
         if out["info"].get("error"):
             stats["wrong_picks"] = stats.get("wrong_picks", 0) + 1
+        if stats.get("log"):
+            with open(stats["log"], "a") as fh:
+                fh.write(f"    pick {req['target']}: {time.time() - t:.1f}s, {hands.hovers - h0} hovers, "
+                         f"{problem or out['info'].get('error') or 'ok'}\n")
         return out
     if req.get("internal"):  # workbench, canvas, commands without a dialog, Done
         return srv.call({"op": "step", "action": action})
