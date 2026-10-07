@@ -3,12 +3,19 @@
 Starts a visible FreeCAD (background, no focus) under the watchdog serving a UI
 session, and at every step rebuilds the model's element list and dialog-field
 values from the OS accessibility tree (see freecad_s1/ui/ax.py for what is and
-isn't read from it). Actions are applied by the session. Reports success and how often the accessibility view agrees with
-the session's own view.
+isn't read from it). Reports success and how often the accessibility view agrees
+with the session's own view.
+
+By default actions are applied by the session. With --act, dialog actions are
+performed from outside the app instead: toolbar buttons, check boxes and OK/Cancel
+are pressed through accessibility and numbers are typed as key events posted to
+FreeCAD (it stays in the background; your mouse and keyboard are untouched).
+Dropdown choices stay with the session (see ax.py); sketches and canvas picks are
+always the session's.
 
     pip install -e ".[ax]"     # pyobjc; grant Accessibility permission to your terminal
     python scripts/mesa_ax.py --episodes 15
-    python scripts/mesa_ax.py --name flange        # a showcase part
+    python scripts/mesa_ax.py --name flange --act  # a showcase part, acting through accessibility
 """
 import sys
 from pathlib import Path
@@ -68,16 +75,23 @@ def launch(port: int, mem_gb: float):
     return proc, srv, reader, AccessibilityActuator(reader, pid)
 
 
-def step(srv: Server, actuator: AccessibilityActuator, action: str, stats: dict) -> dict:
-    """Perform `action` from outside: the session prepares and books it, accessibility performs it."""
-    req = srv.call({"op": "ext_begin", "action": action})["request"]
+def step(srv: Server, actuator: AccessibilityActuator, action: str, stats: dict, inside: tuple) -> dict:
+    """Perform `action` from outside: the session prepares and books it, accessibility performs it
+    (request kinds in `inside` are performed by the session)."""
+    req = srv.call({"op": "ext_begin", "action": action, "inside": list(inside)})["request"]
     if req.get("internal"):  # workbench, canvas, commands without a dialog, Done
         return srv.call({"op": "step", "action": action})
     if "error" in req:
         return {"info": req["info"], **srv.call({"op": "observe"})}
+    if req.get("inside"):
+        stats["acted_inside"] += 1
+        return srv.call({"op": "ext_end"})
     try:
         actuator.perform(req)
         stats["acted_via_accessibility"] += 1
+        if stats.get("log"):
+            with open(stats["log"], "a") as fh:
+                fh.write(f"    after acting: {json.dumps(srv.call({'op': 'diag'})['diag'])}\n")
     except RuntimeError as exc:
         key = re.sub(r"\d+(\.\d+)?", "#", str(exc))[:90]
         stats["actuation_errors"][key] = stats["actuation_errors"].get(key, 0) + 1
@@ -99,7 +113,11 @@ def main() -> None:
     ap.add_argument("--log", help="append each action here before performing it (locates a crash)")
     ap.add_argument("--act", action="store_true",
                     help="also perform dialog actions (toolbar commands, fields, dropdowns, check boxes, OK/Cancel) "
-                         "through accessibility + posted key events, not by the session")
+                         "through accessibility + posted key events, not by the session (dropdown choices "
+                         "stay with the session unless --ax-dropdowns)")
+    ap.add_argument("--ax-dropdowns", action="store_true",
+                    help="with --act, also pick dropdown entries through accessibility (unreliable on macOS: "
+                         "Qt's popup often ignores posted keys while FreeCAD is in the background)")
     args = ap.parse_args()
 
     model = load_checkpoint(args.model) if args.model.endswith(".pt") else from_pretrained(args.model)
@@ -112,7 +130,7 @@ def main() -> None:
                 for k in range(args.episodes)]
     proc, srv, reader, actuator = launch(args.port, args.mem_gb)
     stats = {"steps": 0, "same_elements": 0, "same_decision": 0, "read_ms": [], "notes": {}, "episodes": [],
-             "acted_via_accessibility": 0, "actuation_errors": {}}
+             "acted_via_accessibility": 0, "acted_inside": 0, "actuation_errors": {}, "log": args.log}
     try:
         for k, job in enumerate(jobs):
             try:
@@ -135,7 +153,7 @@ def main() -> None:
                     if args.log:
                         with open(args.log, "a") as fh:
                             fh.write(f"episode {k} step {steps}: {action}\n")
-                    s = step(srv, actuator, action, stats) if args.act else srv.call({"op": "step", "action": action})
+                    s = step(srv, actuator, action, stats, () if args.ax_dropdowns else ("choice",)) if args.act else srv.call({"op": "step", "action": action})
                     if args.log and s["info"].get("error"):
                         with open(args.log, "a") as fh:
                             fh.write(f"    -> error: {s['info']['error']}\n")
@@ -165,7 +183,7 @@ def main() -> None:
               "crashes": sum(1 for e in stats["episodes"] if "crashed" in e), "steps": stats["steps"],
               "same_element_list": stats["same_elements"], "same_decision_as_session_view": stats["same_decision"],
               "accessibility_read_ms_median": round(ms[len(ms) // 2]) if ms else None,
-              "acted_via_accessibility": stats["acted_via_accessibility"],
+              "acted_via_accessibility": stats["acted_via_accessibility"], "acted_inside": stats["acted_inside"],
               "actuation_errors": stats["actuation_errors"],
               "disagreements": dict(sorted(stats["notes"].items(), key=lambda kv: -kv[1])[:10]),
               "detail": stats["episodes"]}

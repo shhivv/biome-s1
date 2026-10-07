@@ -152,15 +152,20 @@ def accessibility_view(snapshot: dict, state: State, actions: list[str]) -> tupl
 # ---------------------------------------------------------------------------------------------
 # Acting from outside the app
 #
-# What works on FreeCAD 1.1 (found by probing the Pad dialog):
+# What works on FreeCAD 1.1 (found by probing the Pad and Pocket dialogs):
 # - toolbar commands, check boxes, OK / Cancel: the accessibility "press" action;
 # - number fields: focus them through accessibility, then post select-all + the text + Tab
-#   as key events to the FreeCAD process (setting their AXValue is accepted but ignored);
-# - dropdowns: "press" opens the popup, then posted arrow keys + Return pick the entry (the
-#   entry order comes from the session). Don't read the popup's rows through accessibility:
-#   Qt crashes later when FreeCAD rebuilds the panel. Marking a row selected does not commit,
-#   and posted mouse clicks are ignored. Never post Escape (it cancels the task dialog) or
-#   Return outside a popup (it presses the dialog's default button, OK).
+#   as key events to the FreeCAD process (setting their AXValue is accepted but ignored).
+#   Lengths and angles (Gui::QuantitySpinBox) only take typed text when editing finishes,
+#   which in the background needs a step: up then down after typing.
+# - dropdowns: unreliable. "press" sometimes opens the popup, but posted arrow keys + Return
+#   reach it only some of the time (while FreeCAD is in the background, and even in front),
+#   and the dropdown never takes keyboard focus while closed. The driver leaves dropdown
+#   choices to the session by default; the code below is kept for --ax-dropdowns.
+#   Don't read the popup's rows through accessibility: Qt crashes later when FreeCAD rebuilds
+#   the panel. Marking a row selected does not commit, and posted mouse clicks are ignored.
+# Never post Escape (it cancels the task dialog) or Return outside a popup (it presses the
+# dialog's default button, OK).
 # Posted events go to the process, not the screen: FreeCAD stays in the background and the
 # user's mouse and keyboard are untouched.
 
@@ -233,7 +238,13 @@ class AccessibilityActuator:
             self._key("a", command=True)
             for ch in req["text"]:
                 self._key(ch)
-            self._key("tab")  # commits the value (Return would press the dialog's OK)
+            if req["unit"] != "count":
+                # FreeCAD's QuantitySpinBox keeps typed text pending until editing finishes, which
+                # needs a real focus change (not available in the background) or Return (which
+                # would press the dialog's OK). Stepping commits the pending text: up, then down.
+                self._key("up")
+                self._key("down")
+            self._key("tab")
             time.sleep(0.2)
         elif kind == "choice":
             el = self._field(req["field"])

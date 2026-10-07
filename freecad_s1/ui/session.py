@@ -134,6 +134,11 @@ class UiSession(GuiSession):
         self.pending: Pending | None = None
         self.messages: list[str] = []
         self._external = None  # (generator, info) of an action being performed from outside
+        # FreeCAD offers Document Recovery after a previous instance died (e.g. killed by the watchdog).
+        # The modal dialog blocks anything acting from outside the app; decline it whenever it shows.
+        self._recovery_timer = QtCore.QTimer()
+        self._recovery_timer.timeout.connect(self._decline_recovery)
+        self._recovery_timer.start(400)
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -381,34 +386,60 @@ class UiSession(GuiSession):
         else:
             raise ActionError(f"unknown request {kind}")
 
-    def _task_panel_out_of_overlay(self) -> None:
-        """FreeCAD 1.1 can show the task panel in an auto-hiding overlay dock. When an action is
-        performed from outside (e.g. a dropdown's popup takes focus), the overlay hides and the
-        dialog's widgets become invisible. Switch that dock side back to a normal dock, once."""
-        if getattr(self, "_overlay_checked", False):
-            return
-        self._overlay_checked = True
-        tv = self.task_view()
-        p = tv.parentWidget() if tv is not None else None
-        while p is not None:
-            name = p.objectName()
-            if "Overlay" in p.metaObject().className() and name.startswith("Overlay"):
-                side = name[len("Overlay"):]  # OverlayRight -> Right
-                if side in ("Left", "Right", "Top", "Bottom"):
-                    Gui.runCommand(f"Std_DockOverlayToggle{side}")
-                    pump(10)
-                return
-            p = p.parentWidget()
+    def _decline_recovery(self) -> None:
+        w = QtWidgets.QApplication.activeModalWidget()
+        if w is not None and "DocumentRecovery" in w.metaObject().className():
+            self.messages.append("declined Document Recovery")
+            w.reject()
 
-    def begin_external(self, element: str) -> dict:
+    def diagnostics(self) -> dict:
+        """What the session can see of the task panel right now (debugging external actions)."""
+        tv = self.task_view()
+        chain, p = [], tv
+        while p is not None:
+            chain.append(f"{p.metaObject().className()}#{p.objectName()} visible={p.isVisible()} hidden={p.isHidden()}")
+            p = p.parentWidget()
+        modal = QtWidgets.QApplication.activeModalWidget()
+        return {"task_view": tv is not None, "dialog_active": bool(Gui.Control.activeDialog()),
+                "pending": None if self.pending is None else self.pending.command,
+                "ok_button": self._button("OK") is not None, "chain": chain[:8],
+                "modal": None if modal is None else f"{modal.metaObject().className()} {modal.windowTitle()}",
+                "messages": self.messages[-3:], "features": self._feature_summary(), "widgets": self._widget_summary()}
+
+    def _widget_summary(self) -> dict:
+        out = {}
+        for name in ("lengthEdit", "lengthEdit2", "chamferSize", "spinOccurrences"):
+            w = self._widget(name)
+            if w is not None:
+                raw = w.property("rawValue")
+                out[name] = {"text": w.text(), "raw": raw if isinstance(raw, (int, float)) else str(raw),
+                             "focus": w.hasFocus()}
+        return out
+
+    def _feature_summary(self) -> list:
+        doc = App.ActiveDocument
+        props = ("Type", "Length", "Length2", "Occurrences", "Angle", "Size", "Reversed", "Midplane", "Constraints")
+        out = []
+        for o in doc.Objects if doc is not None else []:
+            if o.TypeId.startswith("PartDesign::") and o.TypeId != "PartDesign::Body":
+                vals = {}
+                for k in props:
+                    if hasattr(o, k):
+                        v = getattr(o, k)
+                        vals[k] = round(v.Value, 4) if hasattr(v, "Value") else (str(v) if not isinstance(v, (int, float, bool)) else v)
+                out.append({"name": o.Name, "valid": o.isValid(), **{k: v for k, v in vals.items() if k != "Constraints"}})
+        return out
+
+    def begin_external(self, element: str, inside: tuple = ()) -> dict:
         """Prepare a dialog action to be performed from outside the app. Returns
         the request ({"kind": "command" | "number" | "choice" | "toggle" |
         "button", ...}); {"internal": True} for elements the session performs
-        itself (workbench, canvas, commands without a dialog, Done)."""
+        itself (workbench, canvas, commands without a dialog, Done). Requests
+        whose kind is in `inside` are performed here too ({"inside": True, ...});
+        end_external() still finishes and verifies them."""
         role = S.role(element)
         if role not in ("set", "opt", "toggle", "click") and not (role == "cmd" and S.underlying(element) in S.DIALOG_COMMANDS):
             return {"internal": True}
-        self._task_panel_out_of_overlay()
         info = {"changed": False, "error": None, "done": False, "on_plan": element in self.expert()}
         self.recent.append(element)
         try:
@@ -419,6 +450,9 @@ class UiSession(GuiSession):
             self.settle()
             return {"error": str(exc), "info": info}
         self._external = (gen, info)
+        if request["kind"] in inside:
+            self._actuate(request)
+            return {"inside": True, "kind": request["kind"]}
         return {k: v for k, v in request.items() if not k.startswith("_")}
 
     def end_external(self) -> dict:
@@ -496,9 +530,13 @@ class UiSession(GuiSession):
                 text = str(int(round(value))) if fl.unit == "count" else f"{value:g}"
                 yield {"kind": "number", "field": name, "value": value, "unit": fl.unit, "text": text}
                 pump(3)
-                got = self._read_number(self._widget(name))
+                w = self._widget(name)
+                got = self._read_number(w)
                 if got is None or not S.value_matches(round(value) if fl.unit == "count" else value, got):
                     raise ActionError(f"{element}: the field shows {got!r}, not {text}")
+                raw = w.property("rawValue")  # Gui::QuantitySpinBox: the value it would apply
+                if isinstance(raw, float) and fl.unit != "count" and not S.value_matches(value, raw):
+                    raise ActionError(f"{element}: the field shows {got!r} but holds {raw!r}")
             elif fl.kind == "choice":
                 option = S.option_text(element)
                 options = [w.itemText(i) for i in range(w.count())]
