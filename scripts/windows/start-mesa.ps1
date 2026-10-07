@@ -6,7 +6,7 @@ param(
     [string]$Split = "iid",
     [int]$Seed = 7,
     [string]$Out = "runs\windows\mesa",
-    [int]$Port = 8765,
+    [ValidateRange(1, 65535)][int]$Port = 8765,
     [switch]$SkipImportCheck,
     [string]$FreeCADApp = "",
     [string]$MacroPath = "",

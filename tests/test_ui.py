@@ -4,6 +4,8 @@ import subprocess
 import sys
 import textwrap
 
+import pytest
+
 from freecad_s1.schema import GoalFeature
 from freecad_s1.ui import spec as S
 from freecad_s1.ui import launch
@@ -70,6 +72,16 @@ def test_freecad_app_preserves_non_windows_override(monkeypatch):
     monkeypatch.setenv("FREECAD_APP", "custom-freecad")
 
     assert launch.freecad_app() == "custom-freecad"
+
+
+def test_freecad_app_rejects_non_freecad_windows_override(tmp_path, monkeypatch):
+    other = tmp_path / "python.exe"
+    other.touch()
+    monkeypatch.setattr(launch, "_IS_WINDOWS", True, raising=False)
+    monkeypatch.setenv("FREECAD_APP", str(other))
+
+    with pytest.raises(FileNotFoundError, match="FREECAD_APP.*FreeCAD.exe"):
+        launch.freecad_app()
 
 
 def test_non_windows_launch_preserves_xvfb_behavior(tmp_path, monkeypatch):

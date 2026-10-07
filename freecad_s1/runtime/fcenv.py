@@ -61,6 +61,8 @@ def _windows_layout(root_or_app: str | Path) -> tuple[str, str] | None:
     path = _resolved(root_or_app)
     roots = [path]
     if path.is_file():
+        if path.name.casefold() != "freecad.exe":
+            return None
         roots = [path.parent]
     elif path.is_dir():
         roots.extend(child for child in path.iterdir() if child.is_dir())

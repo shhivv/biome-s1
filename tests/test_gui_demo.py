@@ -1,6 +1,8 @@
 import io
 import sys
 
+import pytest
+
 from scripts import gui_demo
 
 
@@ -69,3 +71,13 @@ def test_status_output_survives_legacy_console_encoding(tmp_path, monkeypatch):
     assert _run_demo(tmp_path, monkeypatch, action="Akcja ś") == 0
     stdout.flush()
     assert "OK" in data.getvalue().decode("cp1252")
+
+
+@pytest.mark.parametrize("port", [0, 65536])
+def test_main_rejects_invalid_tcp_port(monkeypatch, port):
+    monkeypatch.setattr(sys, "argv", ["gui_demo.py", "--port", str(port)])
+
+    with pytest.raises(SystemExit) as error:
+        gui_demo.main()
+
+    assert error.value.code == 2

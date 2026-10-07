@@ -53,7 +53,7 @@ def freecad_app() -> str:
     if app:
         if _IS_WINDOWS:
             path = Path(app).expanduser().resolve()
-            if not path.is_file():
+            if not path.is_file() or path.name.casefold() != "freecad.exe":
                 raise FileNotFoundError(f"FREECAD_APP does not name FreeCAD.exe: {path}")
             return str(path)
         return app

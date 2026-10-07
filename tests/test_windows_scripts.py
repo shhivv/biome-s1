@@ -272,6 +272,23 @@ def test_preflight_rejects_busy_port_without_stopping_listener(tmp_path):
         listener.close()
 
 
+@pytest.mark.parametrize("port", [0, 65536])
+def test_preflight_rejects_invalid_tcp_port(tmp_path, port):
+    root = _freecad_fixture(tmp_path / "FreeCAD")
+
+    result = _ps_file(
+        "preflight.ps1",
+        "-FreeCADRoot",
+        str(root),
+        "-Port",
+        str(port),
+        "-SkipImportCheck",
+    )
+
+    assert result.returncode != 0
+    assert "port" in result.stderr.lower()
+
+
 def _fake_launch_files(tmp_path: Path) -> tuple[Path, Path, Path]:
     capture = tmp_path / "capture with spaces"
     capture.mkdir()

@@ -45,6 +45,13 @@ class SocketEnv:
         return resp
 
 
+def tcp_port(value: str) -> int:
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("port must be between 1 and 65535")
+    return port
+
+
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="backslashreplace")
@@ -55,7 +62,7 @@ def main() -> int:
     ap.add_argument("--split", default="iid")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--delay", type=float, default=0.4, help="seconds between steps (for watching)")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--port", type=tcp_port, default=8765)
     ap.add_argument("--out", default="runs/gui_demo")
     ap.add_argument("--goals", help="JSON file of named goals ({name: goal}); use with --name")
     ap.add_argument("--name", help="which goal from --goals to build")

@@ -40,6 +40,15 @@ def test_windows_freecad_app_handles_spaces(tmp_path, monkeypatch):
     assert fcenv.freecad_python() == (str(python.resolve()), str(lib.resolve()))
 
 
+def test_windows_freecad_app_rejects_other_executable_in_valid_layout(tmp_path, monkeypatch):
+    _, python, _ = _freecad_tree(tmp_path / "FreeCAD")
+    _windows(monkeypatch, tmp_path)
+    monkeypatch.setenv("FREECAD_APP", str(python))
+
+    with pytest.raises(FileNotFoundError, match="FREECAD_APP"):
+        fcenv.freecad_python()
+
+
 @pytest.mark.parametrize("override", ["python", "lib"])
 def test_windows_partial_override_derives_sibling(tmp_path, monkeypatch, override):
     _, python, lib = _freecad_tree(tmp_path / "FreeCAD")

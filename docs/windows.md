@@ -46,6 +46,7 @@ A valid installation contains `bin\FreeCAD.exe`, `bin\python.exe`, and
 `bin\FreeCAD.pyd`. The Python runtime also recognizes `FREECAD_APP`,
 `FREECAD_PYTHON`, and `FREECAD_LIB`; the PowerShell launchers derive those
 values from `-FreeCADRoot` and set them only for their own process tree.
+When set directly, `FREECAD_APP` must point to `bin\FreeCAD.exe`.
 
 ## Run the demos
 

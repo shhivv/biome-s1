@@ -2,7 +2,7 @@
 param(
     [string]$FreeCADRoot = "",
     [string]$ProjectPython = "",
-    [int]$Port = 8765,
+    [ValidateRange(1, 65535)][int]$Port = 8765,
     [switch]$SkipImportCheck,
     [switch]$Json
 )

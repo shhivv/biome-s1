@@ -95,7 +95,7 @@ function Set-S1ProcessEnvironment {
 }
 
 function Assert-S1PortAvailable {
-    param([int]$Port = 8765)
+    param([ValidateRange(1, 65535)][int]$Port = 8765)
 
     $client = New-Object Net.Sockets.TcpClient
     try {
