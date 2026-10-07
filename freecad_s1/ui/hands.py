@@ -65,6 +65,118 @@ def parse_status(text: str) -> Hover | None:
     return Hover(obj, sub, tuple(nums))
 
 
+class ViewImage:
+    """A screenshot of the 3D view split into visible face patches: pixels that are neither the
+    background nor FreeCAD's dark edge lines, in connected regions (edges separate faces)."""
+
+    def __init__(self, shot: screen.Shot, rect: tuple[float, float, float, float], step: int = 4) -> None:
+        import numpy as np
+
+        w, h, _, raw = shot.pixels()
+        self.full = np.frombuffer(raw, np.uint8).reshape(h, w, 4)[..., :3]
+        img = self.full.astype(np.int16)
+        self.shot, self.step, self.s = shot, step, shot.scale
+        self.px1 = int((rect[0] + rect[2] - shot.x) * shot.scale)
+        self.px0 = max(int((rect[0] - shot.x) * self.s), 0)
+        self.py0 = max(int((rect[1] - shot.y) * self.s), 0)
+        px1, py1 = int((rect[0] + rect[2] - shot.x) * self.s), int((rect[1] + rect[3] - shot.y) * self.s)
+        a = img[self.py0:py1:step, self.px0:px1:step]
+        bg = np.median(a[:, :3], axis=1, keepdims=True)  # per row, from the view's left edge
+        part = np.abs(a - bg).max(axis=2) > 18
+        dark = a.mean(axis=2) < 90  # edge lines
+        mask = part & ~dark
+        H, W = mask.shape
+        mask[: int(H * 0.32), int(W * 0.82):] = False  # navigation cube
+        mask[int(H * 0.86):, int(W * 0.9):] = False  # axis cross
+        self.mask, self.dark, self.H, self.W = mask, dark & part, H, W
+        depth = np.zeros(mask.shape, np.int16)
+        cur = mask.copy()
+        for _ in range(40):
+            nxt = cur.copy()
+            nxt[1:] &= cur[:-1]; nxt[:-1] &= cur[1:]; nxt[:, 1:] &= cur[:, :-1]; nxt[:, :-1] &= cur[:, 1:]
+            nxt[0] = nxt[-1] = False
+            nxt[:, 0] = nxt[:, -1] = False
+            if not nxt.any():
+                break
+            depth += nxt
+            cur = nxt
+        self.labels = np.zeros(mask.shape, np.int32)
+        self.regions: list[dict] = []
+        n = 0
+        for sy, sx in zip(*np.nonzero(mask)):
+            if self.labels[sy, sx]:
+                continue
+            n += 1
+            self.labels[sy, sx] = n
+            stack, cells = [(sy, sx)], []
+            while stack:
+                cy, cx = stack.pop()
+                cells.append((cy, cx))
+                for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
+                    if 0 <= ny < H and 0 <= nx < W and mask[ny, nx] and not self.labels[ny, nx]:
+                        self.labels[ny, nx] = n
+                        stack.append((ny, nx))
+            if len(cells) < 25:
+                continue
+            arr = np.array(cells)
+            d = depth[arr[:, 0], arr[:, 1]]
+            best = arr[int(d.argmax())]
+            deep = arr[d >= d.max() // 2]
+            far = deep[int(((deep - best) ** 2).sum(axis=1).argmax())]
+            far2 = deep[int(((deep - far) ** 2).sum(axis=1).argmax())]
+            self.regions.append({"label": n, "area": len(cells) * (step / self.s) ** 2,
+                                 "points": [self.to_point(*best), self.to_point(*far), self.to_point(*far2)]})
+        self.regions.sort(key=lambda r: -r["area"])
+
+    def bounds(self) -> tuple[float, float, float, float] | None:
+        """The part's extent on screen (points): x0, y0, x1, y1."""
+        import numpy as np
+
+        ys, xs = np.nonzero(self.mask | self.dark)
+        if len(xs) == 0:
+            return None
+        (ax, ay), (bx, by) = self.to_point(ys.min(), xs.min()), self.to_point(ys.max(), xs.max())
+        return ax, ay, bx, by
+
+    def dark_crossings(self, y: float) -> list[float]:
+        """x positions (points) where dark lines (edges) cross the row at height y."""
+        import numpy as np
+
+        py = int(round((y - self.shot.y) * self.s))
+        if not 0 <= py < self.full.shape[0]:
+            return []
+        row = self.full[py, self.px0:self.px1].astype(np.int16)
+        bg = np.median(row[:6], axis=0)
+        dark = (row.mean(axis=1) < 90) & (np.abs(row - bg).max(axis=1) > 18)  # full resolution: lines are thin
+        xs, run = [], []
+        for px, d in enumerate(dark):
+            if d:
+                run.append(px)
+            elif run:
+                xs.append(self.shot.x + (self.px0 + sum(run) / len(run)) / self.s)
+                run = []
+        return xs
+
+    def to_point(self, cy, cx) -> tuple[float, float]:
+        return (self.shot.x + (self.px0 + cx * self.step) / self.s, self.shot.y + (self.py0 + cy * self.step) / self.s)
+
+    def to_cell(self, x, y) -> tuple[int, int]:
+        return (int(round(((y - self.shot.y) * self.s - self.py0) / self.step)),
+                int(round(((x - self.shot.x) * self.s - self.px0) / self.step)))
+
+    def last_exit(self, label: int, x: float, y: float, dx: float, dy: float) -> float | None:
+        """Distance (points) along a ray from (x, y) to the last pixel of region `label`."""
+        last, t = None, 0.0
+        cell = self.step / self.s
+        while True:
+            cy, cx = self.to_cell(x + dx * t, y + dy * t)
+            if not (0 <= cy < self.H and 0 <= cx < self.W):
+                return last
+            if self.labels[cy, cx] == label:
+                last = t
+            t += cell
+
+
 class Hands:
     def __init__(self, reader: AccessibilityReader, pid: int) -> None:
         self.r = reader
@@ -107,11 +219,17 @@ class Hands:
         return str(self.r._attr(self._status, "AXValue") or "")
 
     def view_rect(self) -> tuple[float, float, float, float]:
+        """The 3D view, minus a task panel floating over its right side (FreeCAD's overlay)."""
         el = self._walk(lambda e: "Gui::View3DInventor" in str(self.r._attr(e, "AXIdentifier") or "")
                         and str(self.r._attr(e, "AXIdentifier") or "").endswith("QStackedWidget"))
         if el is None:
             raise RuntimeError("3D view not found")
-        return self._frame(el)
+        x, y, w, h = self._frame(el)
+        panel = self._walk(lambda e: str(self.r._attr(e, "AXIdentifier") or "").endswith(".OverlayRight"))
+        f = self._frame(panel) if panel is not None else None
+        if f is not None and f[2] > 0 and x < f[0] < x + w:
+            w = f[0] - x
+        return x, y, w, h
 
     def tree_rect(self) -> tuple[float, float, float, float]:
         # The tree itself is an AXOutline; its frame is safe to read (its rows are not).
@@ -195,27 +313,50 @@ class Hands:
                     hits.append(hit)
         return hits
 
+    def _region_faces(self, img: ViewImage, axis: int, limit: int = 10) -> dict[tuple, dict]:
+        """Hover a few interior points of each visible patch; keep patches that are one flat face
+        perpendicular to the view. Returns {(obj, sub): {"area", "level", "point", "regions"}}."""
+        faces: dict[tuple, dict] = {}
+        for reg in img.regions[:limit]:
+            hits = [self.hover(x, y) for x, y in reg["points"]]
+            if not all(h is not None and h.sub.startswith("Face") for h in hits):
+                continue
+            if len({(h.obj, h.sub) for h in hits}) != 1 or max(h.point[axis] for h in hits) - min(h.point[axis] for h in hits) > 1e-3:
+                continue
+            f = faces.setdefault((hits[0].obj, hits[0].sub), {"area": 0.0, "level": hits[0].point[axis],
+                                                              "point": hits[0], "regions": []})
+            f["area"] += reg["area"]
+            f["regions"].append(reg)
+        return faces
+
     def pick_face(self, direction: str) -> None:
-        """The largest flat face whose outward normal is `direction`: look at the part from
-        that side, hover a grid, keep faces whose hovered points all lie in one plane
-        perpendicular to the view, and click the one covering most of the view."""
+        """The largest flat face whose outward normal is `direction`: look at the part from that
+        side, find the visible patches in a screenshot, hover a few points of each, and click the
+        flat face covering the most of the view."""
         self.look(_VIEW_FOR[direction])
         axis = _AXIS[direction[1]]
         sign = 1 if direction[0] == "+" else -1
-        faces: dict[tuple, list[Hover]] = {}
-        for n, m in ((14, 10), (28, 20)):
-            for hit in self.grid(n, m):
-                if hit.sub.startswith("Face"):
-                    faces.setdefault((hit.obj, hit.sub), []).append(hit)
-            flat = {k: v for k, v in faces.items() if max(p.point[axis] for p in v) - min(p.point[axis] for p in v) < 1e-3}
-            if flat:
-                break
-        if not flat:
-            raise RuntimeError(f"no flat face seen from the {_VIEW_FOR[direction].lower()}")
-        key = max(flat, key=lambda k: (len(flat[k]), sign * flat[k][0].point[axis]))
-        pts = flat[key]
-        cx, cy = sum(p.x for p in pts) / len(pts), sum(p.y for p in pts) / len(pts)
-        target = min(pts, key=lambda p: (p.x - cx) ** 2 + (p.y - cy) ** 2)  # a hovered point near its middle
+        img = ViewImage(self.win.capture(), self.view_rect())
+        faces = self._region_faces(img, axis)
+        if faces:
+            key = max(faces, key=lambda k: (round(faces[k]["area"]), sign * faces[k]["level"]))
+            target = faces[key]["point"]
+        else:  # nothing recognisable in the picture: hover a grid
+            flat: dict[tuple, list[Hover]] = {}
+            for n, m in ((14, 10), (28, 20)):
+                for hit in self.grid(n, m):
+                    if hit.sub.startswith("Face"):
+                        flat.setdefault((hit.obj, hit.sub), []).append(hit)
+                flat = {k: v for k, v in flat.items()
+                        if max(p.point[axis] for p in v) - min(p.point[axis] for p in v) < 1e-3}
+                if flat:
+                    break
+            if not flat:
+                raise RuntimeError(f"no flat face seen from the {_VIEW_FOR[direction].lower()}")
+            key = max(flat, key=lambda k: (len(flat[k]), sign * flat[k][0].point[axis]))
+            pts = flat[key]
+            cx, cy = sum(p.x for p in pts) / len(pts), sum(p.y for p in pts) / len(pts)
+            target = min(pts, key=lambda p: (p.x - cx) ** 2 + (p.y - cy) ** 2)
         if self.hover(target.x, target.y) is None:
             raise RuntimeError("face moved under the cursor")
         self.click(target.x, target.y)
@@ -278,60 +419,33 @@ class Hands:
                 return
         raise RuntimeError("no empty spot in the 3D view")
 
-    def _flat_faces(self, hits: list[Hover], axis: int) -> dict[tuple, list[Hover]]:
-        faces: dict[tuple, list[Hover]] = {}
-        for hit in hits:
-            if hit.sub.startswith("Face"):
-                faces.setdefault((hit.obj, hit.sub), []).append(hit)
-        return {k: v for k, v in faces.items() if max(p.point[axis] for p in v) - min(p.point[axis] for p in v) < 1e-3}
-
-    @staticmethod
-    def _bounds(hits: list[Hover], pad: float = 12.0) -> tuple[float, float, float, float]:
-        return (min(h.x for h in hits) - pad, min(h.y for h in hits) - pad,
-                max(h.x for h in hits) + pad, max(h.y for h in hits) + pad)
-
-    def _edge_inward(self, cx, cy, dx, dy, tmax, level, axis=2):
-        """Walk from outside the part (distance tmax from the face's middle) towards the
-        middle; at the first point at the face's height, search finely just outside it
-        for an edge at that height."""
-        t = tmax
-        while t > 0:
-            hit = self.hover(cx + dx * t, cy + dy * t)
-            if hit is not None and abs(hit.point[axis] - level) < 1e-3:
-                if hit.sub.startswith("Edge"):
-                    return hit
-                for k in range(1, 13):  # 0.5 pt steps back outward
-                    e = self.hover(cx + dx * (t + 0.5 * k), cy + dy * (t + 0.5 * k))
-                    if e is not None and e.sub.startswith("Edge") and abs(e.point[axis] - level) < 1e-3:
-                        return e
-                return None
-            t -= 3.0
-        return None
-
     def pick_top_edges(self) -> None:
-        """The outer edges of the largest upward face: look from the top and, along rays
-        from outside the part towards the face's middle, take the first edge at the
-        face's height."""
+        """The outer edges of the largest upward face: in a top view, march along rays from the
+        face's middle to where its patch ends for the last time (the screenshot says where), and
+        hover just around there for an edge at the face's height."""
         import math
 
         self.look("Top")
-        hits = self.grid(28, 20)
-        flat = self._flat_faces(hits, 2)
-        if not flat:
+        img = ViewImage(self.win.capture(), self.view_rect())
+        faces = self._region_faces(img, 2)
+        if not faces:
             raise RuntimeError("no flat face seen from the top")
-        key = max(flat, key=lambda k: (len(flat[k]), flat[k][0].point[2]))
-        pts, level = flat[key], flat[key][0].point[2]
-        cx, cy = sum(p.x for p in pts) / len(pts), sum(p.y for p in pts) / len(pts)
-        x0, y0, x1, y1 = self._bounds(hits)
+        key = max(faces, key=lambda k: (round(faces[k]["area"]), faces[k]["level"]))
+        level = faces[key]["level"]
         edges: dict[str, Hover] = {}
-        for k in range(24):
-            a = 2 * math.pi * (k + 0.5) / 24
-            dx, dy = math.cos(a), math.sin(a)
-            tx = ((x1 - cx) / dx if dx > 0 else (x0 - cx) / dx) if abs(dx) > 1e-9 else 1e9
-            ty = ((y1 - cy) / dy if dy > 0 else (y0 - cy) / dy) if abs(dy) > 1e-9 else 1e9
-            e = self._edge_inward(cx, cy, dx, dy, min(tx, ty), level)
-            if e is not None:
-                edges.setdefault(e.sub, e)
+        for reg in faces[key]["regions"]:
+            cx, cy = reg["points"][0]
+            for k in range(36):
+                a = 2 * math.pi * (k + 0.5) / 36
+                dx, dy = math.cos(a), math.sin(a)
+                t = img.last_exit(reg["label"], cx, cy, dx, dy)
+                if t is None:
+                    continue
+                for dt in (1.0, 2.0, 0.0, 3.0, 1.5, 2.5, 4.0, -1.0):
+                    e = self.hover(cx + dx * (t + dt), cy + dy * (t + dt))
+                    if e is not None and e.sub.startswith("Edge") and abs(e.point[2] - level) < 1e-3:
+                        edges.setdefault(e.sub, e)
+                        break
         if not edges:
             raise RuntimeError("no outer edges found")
         for i, e in enumerate(edges.values()):
@@ -339,19 +453,26 @@ class Hands:
             self.click(e.x, e.y, add=i > 0)
 
     def pick_vertical_edges(self) -> None:
-        """Straight vertical edges: in an isometric wireframe view, sweep across the part at
-        mid-height and keep edges whose hovered points straight above and below share x, y."""
+        """Straight vertical edges: in an isometric wireframe view (hidden edges drawn too), take
+        rows across the part, hover where dark lines cross them in a screenshot, and keep edges
+        whose points just above and below differ only in height."""
         self.look("Isometric")
-        bx0, by0, bx1, by1 = self._bounds(self.grid(20, 14), pad=6)  # shaded: faces show the outline
         self.menu("View", "Draw Style", "Wireframe")
         try:
+            time.sleep(0.3)
+            img = ViewImage(self.win.capture(), self.view_rect())
+            box = img.bounds()
+            if box is None:
+                raise RuntimeError("part not visible")
+            x0, y0, x1, y1 = box
             found: dict[str, Hover] = {}
-            for fy in (0.5, 0.65, 0.35):
-                y = by0 + (by1 - by0) * fy
-                x = bx0
-                while x < bx1:
-                    hit = self.hover(x, y)
-                    x += 1.0
+            for fy in (0.5, 0.62, 0.38, 0.72, 0.28):
+                y = y0 + (y1 - y0) * fy
+                for x in img.dark_crossings(y):
+                    for dx in (0.0, -1.0, 1.0):
+                        hit = self.hover(x + dx, y)
+                        if hit is not None and hit.sub.startswith("Edge"):
+                            break
                     if hit is None or not hit.sub.startswith("Edge") or hit.sub in found:
                         continue
                     a, b = self.hover(hit.x, hit.y - 4), self.hover(hit.x, hit.y + 4)
