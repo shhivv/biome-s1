@@ -61,7 +61,29 @@ class Server:
         return resp
 
 
+def clear_own_recovery() -> list[str]:
+    """FreeCAD offers Document Recovery at startup for documents of instances that were killed,
+    and that dialog gets in the way of anything acting from outside. Remove the recovery data of
+    our own documents (S1Doc*, or files in this repo), and only while no FreeCAD is running."""
+    if subprocess.run(["pgrep", "-if", "bin/freecad"], capture_output=True).returncode == 0:
+        return []
+    removed = []
+    for cache in Path.home().glob("Library/Caches/FreeCAD/v*/Cache"):
+        for d in cache.glob("FreeCAD_Doc_*"):
+            xml = d / "fc_recovery_file.xml"
+            if not xml.exists():
+                continue
+            text = xml.read_text(errors="ignore")
+            label = re.search(r"<Label>(.*?)</Label>", text)
+            fname = re.search(r"<FileName>(.*?)</FileName>", text)
+            if (label and label.group(1).startswith("S1Doc")) or (fname and fname.group(1).startswith(str(ROOT))):
+                shutil.rmtree(d, ignore_errors=True)
+                removed.append(d.name)
+    return removed
+
+
 def launch(port: int, mem_gb: float):
+    clear_own_recovery()
     tmp = Path(tempfile.mkdtemp(prefix="s1-mesa-ax-"))
     script = tmp / "mesa_ax_server.FCMacro"  # unique path: the watchdog's handle on this FreeCAD
     shutil.copy(ROOT / "scripts" / "ui_server.FCMacro", script)
@@ -75,10 +97,24 @@ def launch(port: int, mem_gb: float):
     return proc, srv, reader, AccessibilityActuator(reader, pid)
 
 
-def step(srv: Server, actuator: AccessibilityActuator, action: str, stats: dict, inside: tuple) -> dict:
+def step(srv: Server, actuator: AccessibilityActuator, action: str, stats: dict, inside: tuple, hands=None) -> dict:
     """Perform `action` from outside: the session prepares and books it, accessibility performs it
-    (request kinds in `inside` are performed by the session)."""
-    req = srv.call({"op": "ext_begin", "action": action, "inside": list(inside)})["request"]
+    (request kinds in `inside` are performed by the session). With `hands`, selections in the
+    3D view and model tree are made with the real mouse too."""
+    req = srv.call({"op": "ext_begin", "action": action, "inside": list(inside), "canvas": hands is not None})["request"]
+    if req.get("kind") == "pick":
+        t = time.time()
+        try:
+            hands.perform(req["target"])
+            stats["picked_with_mouse"] = stats.get("picked_with_mouse", 0) + 1
+        except RuntimeError as exc:
+            key = re.sub(r"\d+(\.\d+)?", "#", str(exc))[:90]
+            stats["actuation_errors"][key] = stats["actuation_errors"].get(key, 0) + 1
+        stats.setdefault("pick_seconds", []).append(time.time() - t)
+        out = srv.call({"op": "ext_end"})
+        if out["info"].get("error"):
+            stats["wrong_picks"] = stats.get("wrong_picks", 0) + 1
+        return out
     if req.get("internal"):  # workbench, canvas, commands without a dialog, Done
         return srv.call({"op": "step", "action": action})
     if "error" in req:
@@ -118,7 +154,15 @@ def main() -> None:
     ap.add_argument("--ax-dropdowns", action="store_true",
                     help="with --act, also pick dropdown entries through accessibility (unreliable on macOS: "
                          "Qt's popup often ignores posted keys while FreeCAD is in the background)")
+    ap.add_argument("--hands", action="store_true",
+                    help="like --act, and also make selections in the 3D view and model tree with the real mouse "
+                         "(FreeCAD comes to the front and the cursor moves: hands off the computer)")
+    ap.add_argument("--strict-picks", action="store_true",
+                    help="with --hands, a wrong pick stays wrong (default: the session books the intended "
+                         "selection and the miss is reported)")
+    ap.add_argument("--record", help="with --hands, record the screen (clicks shown) to this .mov")
     args = ap.parse_args()
+    args.act = args.act or args.hands
 
     model = load_checkpoint(args.model) if args.model.endswith(".pt") else from_pretrained(args.model)
     policy = Policy(model, "cpu")
@@ -129,6 +173,19 @@ def main() -> None:
         jobs = [{"op": "reset", "level": args.level, "split": args.split, "seed": args.seed + k}
                 for k in range(args.episodes)]
     proc, srv, reader, actuator = launch(args.port, args.mem_gb)
+    hands = recorder = prev_front = None
+    if args.hands:
+        from freecad_s1.ui.hands import Hands
+        from freecad_s1.ui.screen import frontmost_pid
+
+        prev_front = frontmost_pid()
+        hands = Hands(reader, actuator.pid)
+        srv.call({"op": "pick_fallback", "on": not args.strict_picks})
+        hands.front()
+        if args.record:
+            recorder = subprocess.Popen(["screencapture", "-v", "-k", "-C", "-x", args.record],
+                                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
     stats = {"steps": 0, "same_elements": 0, "same_decision": 0, "read_ms": [], "notes": {}, "episodes": [],
              "acted_via_accessibility": 0, "acted_inside": 0, "actuation_errors": {}, "log": args.log}
     try:
@@ -153,7 +210,10 @@ def main() -> None:
                     if args.log:
                         with open(args.log, "a") as fh:
                             fh.write(f"episode {k} step {steps}: {action}\n")
-                    s = step(srv, actuator, action, stats, () if args.ax_dropdowns else ("choice",)) if args.act else srv.call({"op": "step", "action": action})
+                    t_act = time.time()
+                    s = (step(srv, actuator, action, stats, () if args.ax_dropdowns else ("choice",), hands)
+                         if args.act else srv.call({"op": "step", "action": action}))
+                    stats.setdefault("act_seconds", []).append(time.time() - t_act)
                     if args.log and s["info"].get("error"):
                         with open(args.log, "a") as fh:
                             fh.write(f"    -> error: {s['info']['error']}\n")
@@ -170,6 +230,10 @@ def main() -> None:
                 proc.kill("crashed")
                 time.sleep(2)
                 proc, srv, reader, actuator = launch(args.port, args.mem_gb)
+                if hands is not None:
+                    hands = Hands(reader, actuator.pid)
+                    srv.call({"op": "pick_fallback", "on": not args.strict_picks})
+                    hands.front()
             stats["episodes"].append(ep)
             print(json.dumps(ep), flush=True)
         try:
@@ -177,6 +241,17 @@ def main() -> None:
         except Exception:
             pass
     finally:
+        if recorder is not None:
+            import signal
+
+            recorder.send_signal(signal.SIGINT)  # screencapture finishes the movie on interrupt
+            recorder.wait(timeout=30)
+        if hands is not None:
+            from freecad_s1.ui.screen import bring_pid_to_front
+
+            hands.mouse.restore()
+            if prev_front:
+                bring_pid_to_front(prev_front)
         proc.kill("done")
     ms = sorted(stats["read_ms"])
     report = {"episodes": len(stats["episodes"]), "success": sum(e["success"] for e in stats["episodes"]),
@@ -184,6 +259,10 @@ def main() -> None:
               "same_element_list": stats["same_elements"], "same_decision_as_session_view": stats["same_decision"],
               "accessibility_read_ms_median": round(ms[len(ms) // 2]) if ms else None,
               "acted_via_accessibility": stats["acted_via_accessibility"], "acted_inside": stats["acted_inside"],
+              "picked_with_mouse": stats.get("picked_with_mouse", 0), "wrong_picks": stats.get("wrong_picks", 0),
+              "pick_seconds_median": (round(sorted(stats["pick_seconds"])[len(stats["pick_seconds"]) // 2], 2)
+                                      if stats.get("pick_seconds") else None),
+              "act_seconds_total": round(sum(stats.get("act_seconds", [])), 1),
               "actuation_errors": stats["actuation_errors"],
               "disagreements": dict(sorted(stats["notes"].items(), key=lambda kv: -kv[1])[:10]),
               "detail": stats["episodes"]}

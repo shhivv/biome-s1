@@ -134,6 +134,7 @@ class UiSession(GuiSession):
         self.pending: Pending | None = None
         self.messages: list[str] = []
         self._external = None  # (generator, info) of an action being performed from outside
+        self.pick_fallback = False  # a wrong outside pick: book the intended selection anyway (reported)
         # FreeCAD offers Document Recovery after a previous instance died (e.g. killed by the watchdog).
         # The modal dialog blocks anything acting from outside the app; decline it whenever it shows.
         self._recovery_timer = QtCore.QTimer()
@@ -387,10 +388,10 @@ class UiSession(GuiSession):
             raise ActionError(f"unknown request {kind}")
 
     def _decline_recovery(self) -> None:
-        w = QtWidgets.QApplication.activeModalWidget()
-        if w is not None and "DocumentRecovery" in w.metaObject().className():
-            self.messages.append("declined Document Recovery")
-            w.reject()
+        for w in QtWidgets.QApplication.topLevelWidgets():
+            if w.isVisible() and "DocumentRecovery" in w.metaObject().className():
+                self.messages.append("declined Document Recovery")
+                w.reject()
 
     def diagnostics(self) -> dict:
         """What the session can see of the task panel right now (debugging external actions)."""
@@ -404,7 +405,9 @@ class UiSession(GuiSession):
                 "pending": None if self.pending is None else self.pending.command,
                 "ok_button": self._button("OK") is not None, "chain": chain[:8],
                 "modal": None if modal is None else f"{modal.metaObject().className()} {modal.windowTitle()}",
-                "messages": self.messages[-3:], "features": self._feature_summary(), "widgets": self._widget_summary()}
+                "messages": self.messages[-3:], "features": self._feature_summary(), "widgets": self._widget_summary(),
+                "selection": [f"{o.ObjectName}:{','.join(o.SubElementNames)}" for o in Gui.Selection.getSelectionEx()],
+                "preselection": str(getattr(Gui.Selection.getPreselection(), "SubElementNames", ""))}
 
     def _widget_summary(self) -> dict:
         out = {}
@@ -430,7 +433,7 @@ class UiSession(GuiSession):
                 out.append({"name": o.Name, "valid": o.isValid(), **{k: v for k, v in vals.items() if k != "Constraints"}})
         return out
 
-    def begin_external(self, element: str, inside: tuple = ()) -> dict:
+    def begin_external(self, element: str, inside: tuple = (), canvas: bool = False) -> dict:
         """Prepare a dialog action to be performed from outside the app. Returns
         the request ({"kind": "command" | "number" | "choice" | "toggle" |
         "button", ...}); {"internal": True} for elements the session performs
@@ -438,6 +441,8 @@ class UiSession(GuiSession):
         whose kind is in `inside` are performed here too ({"inside": True, ...});
         end_external() still finishes and verifies them."""
         role = S.role(element)
+        if canvas and role == "canvas" and S.underlying(element).startswith("Select:") and self.pending is None:
+            return self._begin_pick(element)
         if role not in ("set", "opt", "toggle", "click") and not (role == "cmd" and S.underlying(element) in S.DIALOG_COMMANDS):
             return {"internal": True}
         info = {"changed": False, "error": None, "done": False, "on_plan": element in self.expert()}
@@ -454,6 +459,52 @@ class UiSession(GuiSession):
             self._actuate(request)
             return {"inside": True, "kind": request["kind"]}
         return {k: v for k, v in request.items() if not k.startswith("_")}
+
+    def _begin_pick(self, element: str) -> dict:
+        """A selection made in the 3D view or the model tree by whoever acts from outside
+        (with the real mouse). The session only says what to pick and checks the result."""
+        arg = S.underlying(element).split(":", 1)[1]
+        info = {"changed": False, "error": None, "done": False, "on_plan": element in self.expert()}
+        expected = None if arg == "Clear" else self.resolve_selection(arg)
+        if arg != "Clear" and expected is None:
+            info["error"] = f"nothing to select for {arg}"
+            return {"error": info["error"], "info": info}
+        self.recent.append(element)
+        if arg != "Clear":
+            Gui.Selection.clearSelection()
+            pump(2)
+
+        def finish():
+            yield
+            got = self.gui_selection()
+            want = [] if expected is None else [(expected[0], sorted(expected[1]))]
+            if got != want:
+                info["error"] = f"{element}: picked {got}, expected {want}"
+                info["picked"] = got
+                if not self.pick_fallback:
+                    self.sel_refs, self.meta.selection = [], []
+                    self._sync_gui()
+                    return
+                info["corrected"] = True
+            self.sel_refs, self.meta.selection = ([], []) if expected is None else ([expected], [arg])
+            self._sync_gui()
+
+        gen = finish()
+        next(gen)
+        self._external = (gen, info)
+        return {"kind": "pick", "target": arg}
+
+    def gui_selection(self) -> list:
+        """The GUI's selection as [(object, sorted sub-elements)], sub-elements of the
+        Body's visible feature attributed to that feature."""
+        out = {}
+        for sx in Gui.Selection.getSelectionEx(self.doc.Name if self.doc is not None else ""):
+            obj, subs = sx.ObjectName, list(sx.SubElementNames)
+            if self.body is not None and obj == self.body.Name and subs and "." in subs[0]:
+                obj = subs[0].split(".")[0]
+                subs = [x.split(".", 1)[1] for x in subs]
+            out.setdefault(obj, set()).update(subs)
+        return sorted((k, sorted(v)) for k, v in out.items())
 
     def end_external(self) -> dict:
         gen, info = self._external

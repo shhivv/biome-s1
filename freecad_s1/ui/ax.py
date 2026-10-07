@@ -40,7 +40,11 @@ from . import spec as S
 from .teacher import dialog_elements
 
 GROUPED_ACTIONS = {"New Sketch": "PartDesign_NewSketch"}  # displayed name -> command, for grouped toolbar buttons
-SKIP_ROLES = ("AXOutline", "AXTable", "AXBrowser", "AXList")
+# Never descended into: the model tree's rows (reading them crashes Qt later), and the menu bar
+# (once FreeCAD has been in front its menus are populated, and a path through them leads back to
+# the application element: the walk would loop).
+SKIP_ROLES = ("AXOutline", "AXTable", "AXBrowser", "AXList", "AXApplication", "AXMenuBar", "AXMenuBarItem",
+              "AXMenu", "AXMenuItem")
 FIELD_ROLES = ("AXMenuButton", "AXCheckBox", "AXIncrementor", "AXTextField", "AXPopUpButton", "AXComboBox")
 _NUMBER = re.compile(r"-?\d+(?:[.,]\d+)?")
 
