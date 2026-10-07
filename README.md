@@ -2,6 +2,8 @@
 
 ![Biome-S1: parts the models built in FreeCAD](assets/cover.png)
 
+[![Mesa-S1 operating FreeCAD's interface: every click is the model's (10 s)](release/mesa-s1/assets/poster.jpg)](release/mesa-s1/assets/teaser.mp4)
+
 **A family of tiny, fast "System 1" models for computer-use agents.**
 
 *Biome-S1 is an experiment in whether small, fast decision models can be useful for computer-use agents: a planner decides what to do, and a tiny model handles the step-by-step execution. FreeCAD is the testbed. The next step is the same approach for applications without a scripting API, using the operating system's accessibility tree as the interface.*
@@ -17,7 +19,7 @@ Mesa-S1 does everything Taiga-S1 does, through the interface a person uses: wher
 
 - **Handle longer goals than they trained on.** Trained on goals of up to 5 features, they build 97–100% of 11-feature goals cleanly (~55 commands for Taiga-S1, ~80+ interface steps for Mesa-S1). Taiga-S1 also builds 95% of 17-feature goals.
 - **Recover from mistakes.** With 20% of their actions replaced by random ones, they notice the damage and still build the right part in 88–100% (Taiga-S1) and 92–100% (Mesa-S1) of cases. Taiga-S1 also cleans up after itself; Mesa-S1 more often leaves a stray object behind on long goals (see Results).
-- **Handle unseen combinations.** Feature pairings that never appear in training: 90–100% (Taiga-S1), 99–100% (Mesa-S1).
+- **Handle unseen combinations.** On held-out feature pairings that never appear in training: 90–100% (Taiga-S1, three pairings), 99–100% (Mesa-S1, two pairings).
 - **Drive the real FreeCAD app** over a local socket and build parts live.
 
 The Python package is named `freecad_s1`.
@@ -31,7 +33,7 @@ Built correctly *and cleanly* (the final solid matches the target and no stray o
 | Goal | Taiga-S1 | Mesa-S1 | Taiga-S1, 20% random actions | Mesa-S1, 20% random actions |
 |---|---|---|---|---|
 | Parts like the training set (levels 1 / 2 / 3) | 100 / 100 / 100% | 100 / 100 / 99% (100) | 100 / 93 / 95% (100 / 98 / 98) | 99 / 98 / 85% (100 / 99 / 98) |
-| Feature combinations never seen in training | 90 / 100 / 100% | 99 / 100% (100 / 100) | 95 / 94 / 97% (96 / 95 / 99) | 89 / 95% (100 / 98) |
+| Held-out feature combinations (never seen in training) | 90 / 100 / 100% | 99 / 100% (100 / 100) | 95 / 94 / 97% (96 / 95 / 99) | 89 / 95% (100 / 98) |
 | 6–7 features | 100% | 97% (100) | 86% (88) | 74% (97) |
 | 8–9 features | 100% | 99% | 87% (97) | 70% (95) |
 | 11 features | 100% | 97% (99) | 90% (95) | 55% (92) |

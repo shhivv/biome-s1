@@ -14,6 +14,8 @@ tags:
 
 # Mesa-S1
 
+<video src="assets/teaser.mp4" poster="assets/poster.jpg" controls muted loop width="100%"></video>
+
 **A 1.2M-parameter model that builds CAD parts by operating FreeCAD's interface: toolbar buttons, dialog fields, dropdowns, OK and Cancel.**
 
 *Mesa-S1 is an experiment in whether small, fast decision models can operate real application interfaces for computer-use agents: a planner decides what to build, and a tiny model does the clicking. It does everything [Taiga-S1](https://huggingface.co/shhivv/taiga-s1) does, but where Taiga-S1 picks FreeCAD commands and lets code fill in each dialog, Mesa-S1 works the dialogs itself. FreeCAD is the testbed; the next step is applications without a scripting API, read through the operating system's accessibility tree.*
@@ -40,8 +42,8 @@ Built correctly *and cleanly* (no stray objects left in the document), with the 
 | Goal | Mesa-S1 | With 20% random actions injected | Taiga-S1 (commands, for reference) | Taiga-S1, random actions |
 |---|---|---|---|---|
 | Parts like the training set (levels 1 / 2 / 3, up to 5 features) | 100 / 100 / 99% (100) | 99 / 98 / 85% (100 / 99 / 98) | 100% | 100 / 93 / 95% (100 / 98 / 98) |
-| Feature combinations never seen in training | 99% (100) | 89% (100) | 90% | 95% (96) |
-| Another unseen pairing | 100% | 95% (98) | 100% | 94% (95) |
+| A held-out feature combination (never seen in training) | 99% (100) | 89% (100) | 90% | 95% (96) |
+| Another held-out pairing | 100% | 95% (98) | 100% | 94% (95) |
 | 6–7 features | 97% (100) | 74% (97) | 100% | 86% (88) |
 | 8–9 features | 99% | 70% (95) | 100% | 87% (97) |
 | 11 features | 97% (99) | 55% (92) | 100% | 90% (95) |
