@@ -45,6 +45,18 @@ building one from the outside, and what it implies for AutoCAD.
   accessibility tree and nothing can come to the front. Unattended runs need an
   unlocked session (e.g. a dedicated user or VM).
 
+## Still inside FreeCAD: sketches
+
+Drawing sketch geometry and its constraints is still done by the session. The
+planned path is FreeCAD's on-view parameters (1.0+): with a sketch tool active,
+typed values (`x`, Tab, `y`, Enter, then the radius) place the geometry exactly,
+and FreeCAD adds the matching constraints itself. Typing works with the app in
+the background. Two open questions:
+- Does typing reach the on-view boxes without the cursor over the view?
+- Those constraints (e.g. radius plus position) differ from the ones the session
+  books (lock plus diameter). The session would check the geometry instead of
+  constraint kinds.
+
 ## What this means for AutoCAD
 
 1. **Most of AutoCAD is keystrokes.** Its command line takes commands and
