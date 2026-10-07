@@ -58,7 +58,7 @@ Across the 800 clean episodes the model made no wrong decision that cost a part 
 from freecad_s1.model.net import from_pretrained
 from freecad_s1.rollout import Policy
 
-model = from_pretrained("HF_REPO_ID")
+model = from_pretrained("shhivv/mesa-s1")
 policy = Policy(model, device="cpu")
 
 probs = policy.score(state, goal, elements)   # {element: probability}, best first

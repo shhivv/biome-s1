@@ -10,6 +10,6 @@ VIS=${2:-}
 DIR=${3:-release/hf}
 NAME=$(python3 -c "import json; m=json.load(open('$DIR/config.json'))['metadata']; print(m.get('name','model'), m.get('version',''))")
 sed -i '' "s|HF_REPO_ID|$REPO|g" "$DIR/README.md"
-.venv/bin/hf repo create "$REPO" --repo-type model $VIS --exist-ok
+.venv/bin/hf repos create "$REPO" --repo-type model $VIS --exist-ok
 .venv/bin/hf upload "$REPO" "$DIR" . --repo-type model --commit-message "$NAME"
 echo "https://huggingface.co/$REPO"
