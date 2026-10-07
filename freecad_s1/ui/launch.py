@@ -37,24 +37,41 @@ import threading
 import time
 from pathlib import Path
 
-from ..runtime.fcenv import REPO_ROOT
+from ..runtime.fcenv import REPO_ROOT, freecad_python
 
 DEFAULT_MEM_LIMIT_GB = float(os.environ.get("S1_MEM_LIMIT_GB", "4"))
 DEFAULT_TIMEOUT = float(os.environ.get("S1_TIMEOUT", "1800"))
 _UNITS = {"B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
+_IS_WINDOWS = os.name == "nt"
+
+if _IS_WINDOWS:
+    from . import _win32
 
 
 def freecad_app() -> str:
     app = os.environ.get("FREECAD_APP")
     if app:
+        if _IS_WINDOWS:
+            path = Path(app).expanduser().resolve()
+            if not path.is_file():
+                raise FileNotFoundError(f"FREECAD_APP does not name FreeCAD.exe: {path}")
+            return str(path)
         return app
     if sys.platform == "darwin":
         return "/Applications/FreeCAD.app"
+    if _IS_WINDOWS:
+        _, lib = freecad_python()
+        path = Path(lib) / "FreeCAD.exe"
+        if path.is_file():
+            return str(path.resolve())
+        raise FileNotFoundError(f"FreeCAD.exe not found beside FreeCAD.pyd: {path}")
     return shutil.which("freecad") or shutil.which("FreeCAD") or "freecad"
 
 
-def find_pids(script: str) -> list[int]:
+def find_pids(script: str, root_pid: int | None = None) -> list[int]:
     """FreeCAD processes running `script` (it appears on their command line)."""
+    if _IS_WINDOWS:
+        return _win32.process_tree(root_pid) if root_pid is not None else []
     out = subprocess.run(["pgrep", "-f", script], capture_output=True, text=True).stdout
     return [int(p) for p in out.split() if p.strip().isdigit() and int(p) != os.getpid()]
 
@@ -62,6 +79,8 @@ def find_pids(script: str) -> list[int]:
 def memory_bytes(pid: int) -> int | None:
     """Memory footprint of `pid` (None if it is gone). macOS: `top`'s MEM
     (phys_footprint, includes compressed memory); Linux: VmRSS + VmSwap."""
+    if _IS_WINDOWS:
+        return _win32.memory_bytes(pid)
     if sys.platform == "darwin":
         out = subprocess.run(["top", "-l", "1", "-pid", str(pid), "-stats", "pid,mem"],
                              capture_output=True, text=True).stdout
@@ -83,11 +102,15 @@ def memory_bytes(pid: int) -> int | None:
 def resident_bytes(pid: int) -> int | None:
     """Resident memory via `ps` (fast, but excludes compressed/swapped pages):
     the early signal, sampled often; `memory_bytes` is the full footprint."""
+    if _IS_WINDOWS:
+        return _win32.memory_bytes(pid)
     out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
     return int(out) * 1024 if out.isdigit() else None
 
 
 def _kill(pid: int) -> bool:
+    if _IS_WINDOWS:
+        return _win32.terminate(pid)
     try:
         os.kill(pid, signal.SIGKILL)
         return True
@@ -120,7 +143,7 @@ class GuiProcess:
     def _watch(self) -> None:
         tick = 0
         while not self._stop.is_set():
-            pids = find_pids(self.script)
+            pids = find_pids(self.script, self.proc.pid)
             if self.proc.poll() is not None and not pids:
                 return
             for pid in pids:
@@ -138,7 +161,7 @@ class GuiProcess:
             self._stop.wait(self.poll)
 
     def kill(self, reason: str = "parent exiting") -> None:
-        hit = [pid for pid in find_pids(self.script) if _kill(pid)]
+        hit = [pid for pid in reversed(find_pids(self.script, self.proc.pid)) if _kill(pid)]
         if hit and self.killed is None:
             self.killed = reason
         if self.proc.poll() is None:
@@ -173,6 +196,8 @@ def self_guard(poll: float = 0.25, mem_limit_gb: float | None = None, timeout: f
     def parent_alive() -> bool:
         if not parent:
             return True
+        if _IS_WINDOWS:
+            return _win32.pid_alive(parent)
         try:
             os.kill(parent, 0)
             return True
@@ -190,7 +215,10 @@ def self_guard(poll: float = 0.25, mem_limit_gb: float | None = None, timeout: f
             tick += 1
             if mem > limit or time.time() > deadline or not parent_alive():
                 sys.stderr.write(f"S1 self-guard: killing FreeCAD (mem {mem / (1 << 30):.1f} GB)\n")
-                os.kill(me, signal.SIGKILL)
+                if _IS_WINDOWS:
+                    _win32.terminate(me)
+                else:
+                    os.kill(me, signal.SIGKILL)
             time.sleep(poll)
 
     threading.Thread(target=watch, daemon=True, name="s1-self-guard").start()

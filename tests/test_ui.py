@@ -6,6 +6,7 @@ import textwrap
 
 from freecad_s1.schema import GoalFeature
 from freecad_s1.ui import spec as S
+from freecad_s1.ui import launch
 from freecad_s1.ui.launch import GuiProcess, memory_bytes
 from freecad_s1.ui.teacher import command_elements, dialog_elements, dialog_expert, fields_on_plan
 
@@ -63,6 +64,38 @@ def _standin(tmp_path, body: str):
     return script, subprocess.Popen([sys.executable, str(script)])
 
 
+def test_freecad_app_preserves_non_windows_override(monkeypatch):
+    monkeypatch.setattr(launch, "_IS_WINDOWS", False, raising=False)
+    monkeypatch.setattr(launch.sys, "platform", "linux")
+    monkeypatch.setenv("FREECAD_APP", "custom-freecad")
+
+    assert launch.freecad_app() == "custom-freecad"
+
+
+def test_non_windows_launch_preserves_xvfb_behavior(tmp_path, monkeypatch):
+    script = tmp_path / "script with spaces.py"
+    script.touch()
+    launched = []
+
+    class FakeProcess:
+        pid = 123
+
+    monkeypatch.setattr(launch, "_IS_WINDOWS", False, raising=False)
+    monkeypatch.setattr(launch.sys, "platform", "linux")
+    monkeypatch.setattr(launch, "find_pids", lambda script, root_pid=None: [])
+    monkeypatch.setattr(launch, "freecad_app", lambda: "freecad")
+    monkeypatch.setattr(launch.shutil, "which", lambda name: "xvfb-run" if name == "xvfb-run" else None)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.setattr(launch.subprocess, "Popen", lambda cmd, **kwargs: launched.append((cmd, kwargs)) or FakeProcess())
+    monkeypatch.setattr(launch, "GuiProcess", lambda proc, *args: proc)
+
+    result = launch.launch_gui_script(script, {}, log=tmp_path / "freecad.log")
+
+    assert isinstance(result, FakeProcess)
+    assert launched[0][0] == ["xvfb-run", "-a", "freecad", str(script.resolve())]
+    assert launched[0][1]["env"]["S1_REPO"] == str(launch.REPO_ROOT)
+
+
 def test_watchdog_kills_on_memory_limit(tmp_path):
     script, proc = _standin(tmp_path, """
         import time
@@ -117,14 +150,14 @@ def test_self_guard_kills_its_own_process_over_memory(tmp_path):
             time.sleep(0.05)
         time.sleep(30)
     """)
-    assert code == -9
+    assert code != 0
 
 
 def test_self_guard_exits_when_launcher_is_gone(tmp_path):
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
     code = _self_guarded(tmp_path, {"S1_PARENT_PID": str(dead.pid)}, "import time; time.sleep(30)")
-    assert code == -9
+    assert code != 0
 
 
 def test_ui_model_scores_dialog_elements_with_live_values():
