@@ -108,9 +108,9 @@ def resident_bytes(pid: int) -> int | None:
     return int(out) * 1024 if out.isdigit() else None
 
 
-def _kill(pid: int) -> bool:
+def _kill(pid: int, created_at: int | None = None) -> bool:
     if _IS_WINDOWS:
-        return _win32.terminate(pid)
+        return _win32.terminate(pid, created_at)
     try:
         os.kill(pid, signal.SIGKILL)
         return True
@@ -122,8 +122,9 @@ class GuiProcess:
     """A watched FreeCAD GUI run. `wait()` returns once FreeCAD has exited
     (or was killed); `killed` says why it was killed, if it was.
 
-    Only processes whose command line contains the script path *right now*
-    are ever measured or killed, so a recycled PID is never touched."""
+    On Windows, process ownership is pinned to creation times so a recycled
+    PID is never measured or killed. Other platforms retain the existing
+    command-line membership check."""
 
     def __init__(self, proc: subprocess.Popen, script: str, mem_limit_gb: float, timeout: float,
                  poll: float = 0.2, footprint_every: int = 10) -> None:
@@ -135,18 +136,26 @@ class GuiProcess:
         self.footprint_every = footprint_every  # full footprint (slow `top`) every N polls; `ps` RSS every poll
         self.peak = 0
         self.killed: str | None = None
+        self._root_created_at = _win32.process_created_at(proc.pid) if _IS_WINDOWS else None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._watch, daemon=True)
         self._thread.start()
         atexit.register(self.kill)
 
+    def _owned_processes(self) -> list[tuple[int, int | None]]:
+        if _IS_WINDOWS:
+            if self._root_created_at is None:
+                return []
+            return _win32.process_tree_identities(self.proc.pid, self._root_created_at)
+        return [(pid, None) for pid in find_pids(self.script, self.proc.pid)]
+
     def _watch(self) -> None:
         tick = 0
         while not self._stop.is_set():
-            pids = find_pids(self.script, self.proc.pid)
-            if self.proc.poll() is not None and not pids:
+            processes = self._owned_processes()
+            if self.proc.poll() is not None and not processes:
                 return
-            for pid in pids:
+            for pid, _ in processes:
                 mem = resident_bytes(pid)
                 if tick % self.footprint_every == 0:
                     mem = max(mem or 0, memory_bytes(pid) or 0) or None
@@ -161,7 +170,7 @@ class GuiProcess:
             self._stop.wait(self.poll)
 
     def kill(self, reason: str = "parent exiting") -> None:
-        hit = [pid for pid in reversed(find_pids(self.script, self.proc.pid)) if _kill(pid)]
+        hit = [pid for pid, created_at in reversed(self._owned_processes()) if _kill(pid, created_at)]
         if hit and self.killed is None:
             self.killed = reason
         if self.proc.poll() is None:

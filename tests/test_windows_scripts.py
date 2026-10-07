@@ -1,11 +1,13 @@
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import socket
 import subprocess
 import sys
 import time
+import types
 
 import pytest
 
@@ -86,6 +88,112 @@ def test_common_discovers_installed_freecad(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert Path(result.stdout.strip()) == installed.resolve()
+
+
+def test_common_rejects_invalid_explicit_freecad_app(tmp_path):
+    _freecad_fixture(tmp_path / "Program Files" / "FreeCAD 1.1")
+    env = os.environ.copy()
+    env["ProgramW6432"] = str(tmp_path / "Program Files")
+    env["ProgramFiles"] = str(tmp_path / "Other Program Files")
+    env["LOCALAPPDATA"] = str(tmp_path / "Local AppData")
+    env["FREECAD_APP"] = str(tmp_path / "missing" / "FreeCAD.exe")
+    command = (
+        f". {_quote_ps(WINDOWS_SCRIPTS / 'common.ps1')}; "
+        "(Find-S1FreeCADRoot) | Write-Output"
+    )
+
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "FREECAD_APP" in result.stderr
+
+
+def test_owned_process_tree_rejects_child_older_than_parent():
+    command = (
+        f". {_quote_ps(WINDOWS_SCRIPTS / 'common.ps1')}; "
+        "$root = [pscustomobject]@{ ProcessId = 100; ParentProcessId = 1; "
+        "CreationDate = [datetime]'2026-01-01T12:00:00Z' }; "
+        "$stale = [pscustomobject]@{ ProcessId = 200; ParentProcessId = 100; "
+        "CreationDate = [datetime]'2026-01-01T11:00:00Z' }; "
+        "$child = [pscustomobject]@{ ProcessId = 300; ParentProcessId = 100; "
+        "CreationDate = [datetime]'2026-01-01T12:01:00Z' }; "
+        "@(Get-S1OwnedProcessTree -Processes @($root, $stale, $child) -RootProcessId 100) "
+        "| ForEach-Object ProcessId"
+    )
+
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["100", "300"]
+
+
+def test_stop_process_tree_rejects_reused_root_identity():
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    command = (
+        f". {_quote_ps(WINDOWS_SCRIPTS / 'common.ps1')}; "
+        f"Stop-S1ProcessTree -RootProcessId {sleeper.pid} -RootStartTimeUtcFileTime 1"
+    )
+    try:
+        result = subprocess.run(
+            [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert sleeper.poll() is None
+    finally:
+        _stop = subprocess.run(
+            ["taskkill.exe", "/PID", str(sleeper.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+        )
+        if sleeper.poll() is None:
+            sleeper.wait(timeout=10)
+
+
+def test_stop_process_tree_handles_single_process():
+    from freecad_s1.ui import _win32
+
+    sleeper = subprocess.Popen(
+        [POWERSHELL, "-NoProfile", "-Command", "Start-Sleep -Seconds 60"]
+    )
+    created_at = _win32.process_created_at(sleeper.pid)
+    assert created_at is not None
+    command = (
+        f". {_quote_ps(WINDOWS_SCRIPTS / 'common.ps1')}; "
+        f"Stop-S1ProcessTree -RootProcessId {sleeper.pid} "
+        f"-RootStartTimeUtcFileTime {created_at}"
+    )
+    try:
+        result = subprocess.run(
+            [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        assert result.returncode == 0, result.stderr
+        sleeper.wait(timeout=10)
+    finally:
+        if sleeper.poll() is None:
+            subprocess.run(
+                ["taskkill.exe", "/PID", str(sleeper.pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+            )
 
 
 def test_preflight_preserves_paths_with_spaces_and_is_repeatable(tmp_path):
@@ -176,14 +284,18 @@ import json, os, pathlib, socket, subprocess, sys, time
 capture = pathlib.Path(os.environ["S1_TEST_CAPTURE"])
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
 (capture / "child.pid").write_text(str(child.pid))
+port_text = os.environ.get("S1_PORT")
 (capture / "server.json").write_text(json.dumps({
     "pid": os.getpid(), "argv": sys.argv,
     "repo": os.environ.get("FREECAD_S1_REPO"),
-    "ui": os.environ.get("FREECAD_S1_UI", "")
+    "ui": os.environ.get("FREECAD_S1_UI", ""),
+    "port": port_text
 }))
+if port_text is None:
+    raise SystemExit(9)
 sock = socket.socket()
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind(("127.0.0.1", 8765))
+sock.bind(("127.0.0.1", int(port_text)))
 sock.listen(1)
 while True:
     time.sleep(1)
@@ -239,6 +351,52 @@ def test_launcher_preserves_arguments_mode_and_cleans_owned_tree(tmp_path, launc
     assert Path(run_data["argv"][run_data["argv"].index("--out") + 1]) == output
     assert _wait_dead(server_data["pid"])
     assert _wait_dead(int((capture / "child.pid").read_text()))
+
+
+def test_launcher_passes_nondefault_port_to_server(tmp_path):
+    root = _freecad_fixture(tmp_path / "FreeCAD")
+    capture, server, runner = _fake_launch_files(tmp_path)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    result = _ps_file(
+        "start-taiga.ps1",
+        "-FreeCADRoot",
+        str(root),
+        "-Port",
+        str(port),
+        "-SkipImportCheck",
+        "-FreeCADApp",
+        sys.executable,
+        "-MacroPath",
+        str(server),
+        "-RunnerPath",
+        str(runner),
+        "-CapturePath",
+        str(capture),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    server_data = json.loads((capture / "server.json").read_text())
+    assert server_data["port"] == str(port)
+
+
+def test_freecad_macro_passes_configured_port_to_server(monkeypatch):
+    calls = []
+    launch = types.ModuleType("freecad_s1.ui.launch")
+    launch.self_guard = lambda **kwargs: None
+    server = types.ModuleType("freecad_s1.runtime.gui_server")
+    server.start = lambda port, ui=False: calls.append((port, ui))
+    monkeypatch.setitem(sys.modules, "freecad_s1.ui.launch", launch)
+    monkeypatch.setitem(sys.modules, "freecad_s1.runtime.gui_server", server)
+    monkeypatch.setenv("FREECAD_S1_REPO", str(REPO_ROOT))
+    monkeypatch.setenv("FREECAD_S1_UI", "1")
+    monkeypatch.setenv("S1_PORT", "54321")
+
+    runpy.run_path(str(REPO_ROOT / "scripts" / "freecad_gui_server.FCMacro"))
+
+    assert calls == [(54321, True)]
 
 
 def test_launcher_propagates_runner_failure_and_still_cleans_up(tmp_path):

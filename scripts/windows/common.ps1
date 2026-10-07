@@ -40,8 +40,21 @@ function Resolve-S1FreeCADLayout {
 function Find-S1FreeCADRoot {
     $candidates = New-Object 'System.Collections.Generic.List[string]'
     if ($env:FREECAD_APP) {
-        $bin = Split-Path -Parent ([IO.Path]::GetFullPath($env:FREECAD_APP))
-        $candidates.Add((Split-Path -Parent $bin))
+        $app = [IO.Path]::GetFullPath($env:FREECAD_APP)
+        if (-not (Test-Path -LiteralPath $app -PathType Leaf)) {
+            throw "FREECAD_APP does not name an existing executable: '$app'."
+        }
+        $bin = Split-Path -Parent $app
+        try {
+            $layout = Resolve-S1FreeCADLayout -FreeCADRoot (Split-Path -Parent $bin)
+        }
+        catch {
+            throw "FREECAD_APP does not belong to a complete FreeCAD layout: '$app'. $($_.Exception.Message)"
+        }
+        if (-not [string]::Equals($layout.App, $app, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "FREECAD_APP must point to the FreeCAD.exe selected by its installation layout: '$app'."
+        }
+        return $layout.Root
     }
     foreach ($base in @($env:ProgramW6432, $env:ProgramFiles)) {
         if ($base -and (Test-Path -LiteralPath $base -PathType Container)) {
@@ -173,21 +186,65 @@ function Wait-S1Port {
     throw "FreeCAD did not open TCP port $Port within $TimeoutSeconds seconds."
 }
 
-function Stop-S1ProcessTree {
-    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+function Get-S1OwnedProcessTree {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Processes,
+        [Parameter(Mandatory = $true)][int]$RootProcessId
+    )
 
-    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
-    $ids = New-Object 'System.Collections.Generic.List[int]'
-    $ids.Add($RootProcessId)
+    $byId = @{}
+    foreach ($process in $Processes) { $byId[[int]$process.ProcessId] = $process }
+    if (-not $byId.ContainsKey($RootProcessId)) { return @() }
+
+    $owned = New-Object 'System.Collections.Generic.List[object]'
+    $owned.Add($byId[$RootProcessId])
+    $accepted = @{ $RootProcessId = $byId[$RootProcessId] }
     do {
-        $before = $ids.Count
-        foreach ($process in $processes) {
-            if ($ids.Contains([int]$process.ParentProcessId) -and -not $ids.Contains([int]$process.ProcessId)) {
-                $ids.Add([int]$process.ProcessId)
+        $before = $owned.Count
+        foreach ($process in $Processes) {
+            $processId = [int]$process.ProcessId
+            $parentPid = [int]$process.ParentProcessId
+            if ($accepted.ContainsKey($parentPid) -and -not $accepted.ContainsKey($processId)) {
+                $parentCreated = ([datetime]$accepted[$parentPid].CreationDate).ToUniversalTime()
+                $childCreated = ([datetime]$process.CreationDate).ToUniversalTime()
+                if ($childCreated -ge $parentCreated) {
+                    $accepted[$processId] = $process
+                    $owned.Add($process)
+                }
             }
         }
-    } while ($ids.Count -gt $before)
-    for ($index = $ids.Count - 1; $index -ge 0; $index--) {
-        Stop-Process -Id $ids[$index] -Force -ErrorAction SilentlyContinue
+    } while ($owned.Count -gt $before)
+    return $owned.ToArray()
+}
+
+function Stop-S1ProcessTree {
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [Parameter(Mandatory = $true)][long]$RootStartTimeUtcFileTime
+    )
+
+    $root = Get-Process -Id $RootProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $root -or $root.StartTime.ToUniversalTime().ToFileTimeUtc() -ne $RootStartTimeUtcFileTime) {
+        return
+    }
+
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $owned = @(Get-S1OwnedProcessTree -Processes $processes -RootProcessId $RootProcessId)
+    $identities = @(foreach ($process in $owned) {
+        $current = Get-Process -Id ([int]$process.ProcessId) -ErrorAction SilentlyContinue
+        if ($null -ne $current) {
+            [pscustomobject]@{
+                Id = [int]$process.ProcessId
+                StartTimeUtcFileTime = $current.StartTime.ToUniversalTime().ToFileTimeUtc()
+            }
+        }
+    })
+    for ($index = $identities.Count - 1; $index -ge 0; $index--) {
+        $identity = $identities[$index]
+        $current = Get-Process -Id $identity.Id -ErrorAction SilentlyContinue
+        if ($null -ne $current -and
+            $current.StartTime.ToUniversalTime().ToFileTimeUtc() -eq $identity.StartTimeUtcFileTime) {
+            try { $current.Kill() } catch { }
+        }
     }
 }

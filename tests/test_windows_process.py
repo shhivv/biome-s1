@@ -56,6 +56,23 @@ def test_process_tree_contains_only_root_and_descendants(tmp_path):
         _stop_tree(unrelated.pid)
 
 
+def test_process_tree_rejects_stale_parent_relationship(monkeypatch):
+    from freecad_s1.ui import _win32
+
+    monkeypatch.setattr(_win32, "process_table", lambda: {100: 1, 200: 100, 300: 100})
+    created = {100: 1_200, 200: 1_100, 300: 1_300}
+    monkeypatch.setattr(_win32, "process_created_at", created.get)
+
+    assert _win32.process_tree(100, root_created_at=1_200) == [100, 300]
+
+
+def test_terminate_rejects_reused_pid_identity():
+    from freecad_s1.ui import _win32
+
+    assert not _win32.terminate(os.getpid(), created_at=1)
+    assert _win32.pid_alive(os.getpid())
+
+
 def test_pid_alive_tracks_exit():
     from freecad_s1.ui import _win32
 

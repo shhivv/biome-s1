@@ -20,6 +20,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 
 $freecadProcess = $null
+$freecadProcessStartTime = 0
 $exitCode = 0
 try {
     $repoRoot = Get-S1RepoRoot
@@ -32,6 +33,7 @@ try {
 
     $layout = Resolve-S1FreeCADLayout -FreeCADRoot $FreeCADRoot
     Set-S1ProcessEnvironment -Layout $layout -RepoRoot $repoRoot
+    $env:S1_PORT = [string]$Port
     if ($Ui) { $env:FREECAD_S1_UI = "1" } else { Remove-Item Env:FREECAD_S1_UI -ErrorAction SilentlyContinue }
     if ($CapturePath) { $env:S1_TEST_CAPTURE = [IO.Path]::GetFullPath($CapturePath) }
 
@@ -44,6 +46,7 @@ try {
     if (-not [IO.Path]::IsPathRooted($outPath)) { $outPath = Join-Path $repoRoot $outPath }
 
     $freecadProcess = Start-S1ChildProcess -FilePath $FreeCADApp -ArgumentList @([IO.Path]::GetFullPath($MacroPath))
+    $freecadProcessStartTime = $freecadProcess.StartTime.ToUniversalTime().ToFileTimeUtc()
     Wait-S1Port -Process $freecadProcess -Port $Port
 
     & $ProjectPython ([IO.Path]::GetFullPath($RunnerPath)) --model ([IO.Path]::GetFullPath($modelPath)) `
@@ -56,7 +59,7 @@ catch {
 }
 finally {
     if ($null -ne $freecadProcess) {
-        Stop-S1ProcessTree -RootProcessId $freecadProcess.Id
+        Stop-S1ProcessTree -RootProcessId $freecadProcess.Id -RootStartTimeUtcFileTime $freecadProcessStartTime
         $freecadProcess.Dispose()
     }
 }
