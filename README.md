@@ -125,10 +125,11 @@ FREECAD_S1_REPO=$PWD FREECAD_S1_UI=1 /Applications/FreeCAD.app/Contents/MacOS/Fr
 .venv/bin/python scripts/mesa_demo.py --all
 ```
 
-Mesa-S1 can also read FreeCAD's interface from **outside** the app, through the macOS accessibility tree (the layer screen readers use), instead of FreeCAD's internal Qt widgets: toolbar buttons expose their command names, dialog fields their widget names and values. With that view the model built 15 of 15 level-3 parts correctly, deciding exactly as with the internal view on all 537 steps, at ~20 ms per read (`freecad_s1/ui/ax.py`, `scripts/mesa_ax.py`; `pip install -e ".[ax]"` and Accessibility permission for the terminal). Actions are still applied by the session; the document state still comes from FreeCAD's API.
+Mesa-S1 can also read FreeCAD's interface from **outside** the app, through the macOS accessibility tree (the layer screen readers use), instead of FreeCAD's internal Qt widgets: toolbar buttons expose their command names, dialog fields their widget names and values. With that view the model built 15 of 15 level-3 parts correctly, deciding exactly as with the internal view on all 537 steps, at ~20 ms per read (`freecad_s1/ui/ax.py`, `scripts/mesa_ax.py`; `pip install -e ".[ax]"` and Accessibility permission for the terminal). With `--act` it also **acts** from outside: toolbar buttons, check boxes and OK/Cancel are pressed through accessibility and numbers are typed as key events posted to FreeCAD, which stays in the background (your mouse and keyboard are untouched). That way it built 14 of 15 parts correctly (the 15th ended in a FreeCAD crash mid-dialog), with 174 dialog actions performed through accessibility and no failed ones. Dropdown choices, sketches and canvas picks are still applied inside FreeCAD, and the document state still comes from FreeCAD's API.
 
 ```bash
 .venv/bin/python scripts/mesa_ax.py --episodes 15     # Mesa-S1 reading the UI via the OS accessibility tree
+.venv/bin/python scripts/mesa_ax.py --episodes 15 --act   # ... and clicking/typing through it
 ```
 
 `scripts/mesa_demo.py` runs a visible FreeCAD with `freecad_s1/ui/demo.py`: before each action it outlines the element the model chose (toolbar button, dialog field, dropdown, check box, OK/Cancel), types numbers into fields keystroke by keystroke, and captions the element id, the number of options and the model's decision time. The actions themselves are applied to the widgets programmatically; the highlight shows which one.
