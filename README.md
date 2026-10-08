@@ -109,6 +109,23 @@ Both models are trained the same way, from scratch, without human demonstrations
 
 ## Quick start
 
+### Windows
+
+Community-tested Windows support uses an installed FreeCAD 1.1.x:
+
+```powershell
+uv venv --python 3.11 .venv
+uv pip install --python .venv\Scripts\python.exe -e ".[dev]"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows\preflight.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows\start-taiga.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows\start-mesa.ps1
+```
+
+See [the Windows guide](docs/windows.md) for custom FreeCAD locations,
+outputs, limitations, and troubleshooting.
+
+### macOS and Linux
+
 ```bash
 uv venv --python 3.11 .venv && uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/python -m pytest -q                       # unit tests + FreeCAD integration tests
@@ -154,7 +171,7 @@ Reproduce Mesa-S1 (data through the hidden GUI → three training stages → eva
 S1_MEM_LIMIT_GB=2.5 .venv/bin/python scripts/calibrate.py --model release/mesa-s1 --workers 3
 ```
 
-FreeCAD is found at `/Applications/FreeCAD.app` or on common Linux paths; otherwise set `FREECAD_PYTHON` and `FREECAD_LIB`. The torch process never imports FreeCAD. Taiga-S1 runs FreeCAD's own interpreter as a worker process at ~3 ms per action headless; Mesa-S1 runs hidden FreeCAD GUIs.
+FreeCAD is found at `/Applications/FreeCAD.app`, on common Linux paths, or in common Windows FreeCAD 1.1 installation directories; otherwise set `FREECAD_PYTHON` and `FREECAD_LIB` (or pass `-FreeCADRoot` to the Windows scripts). The torch process never imports FreeCAD. Taiga-S1 runs FreeCAD's own interpreter as a worker process at ~3 ms per action headless; Mesa-S1 runs hidden FreeCAD GUIs.
 
 Usage from Python, and what to pass in (`state`, `goal`, `actions`), is on the model cards: [Taiga-S1](https://huggingface.co/shhivv/taiga-s1), [Mesa-S1](release/mesa-s1/README.md).
 

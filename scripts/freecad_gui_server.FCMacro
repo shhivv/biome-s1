@@ -8,4 +8,4 @@ if repo not in sys.path:
 from freecad_s1.ui.launch import self_guard
 self_guard(mem_limit_gb=4, timeout=24 * 3600)  # visible demo: memory cap, no parent check
 from freecad_s1.runtime.gui_server import start
-start(ui=os.environ.get("FREECAD_S1_UI") == "1")
+start(int(os.environ.get("S1_PORT", "8765")), ui=os.environ.get("FREECAD_S1_UI") == "1")
