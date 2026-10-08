@@ -281,8 +281,8 @@ class Hands:
 
     def look(self, view: str) -> None:
         """Turn the 3D view to a standard view and fit the part."""
-        if view == "Isometric":
-            self.menu("View", "Standard Views", "Axonometric", "Isometric")
+        if view in ("Isometric", "Dimetric", "Trimetric"):
+            self.menu("View", "Standard Views", "Axonometric", view)
         else:
             self.menu("View", "Standard Views", view)
         self.press_tool("Std_ViewFitAll")
@@ -400,6 +400,24 @@ class Hands:
         cw = t.w / max(len(t.text), 1)
         return t.x + cw * (i + len(word) / 2), t.y + t.h / 2
 
+    def _expander(self, row: screen.Text) -> tuple[float, float] | None:
+        """The expand/collapse triangle of a tree row: the leftmost dark mark on the row's line."""
+        import numpy as np
+
+        x, y, w, h = self.tree_rect()
+        shot = self.win.capture()
+        cy = row.y + row.h / 2
+        band = shot.crop(x, cy - 3, min(row.x + row.w, x + w) - x, 6)
+        bw, bh, _, raw = band.pixels()
+        a = np.frombuffer(raw, np.uint8).reshape(bh, bw, 4)[..., :3].mean(axis=2)
+        cols = np.nonzero((a < 120).any(axis=0))[0]
+        if len(cols) == 0:
+            return None
+        run_end = cols[0]
+        while run_end + 1 in cols:
+            run_end += 1
+        return x + (cols[0] + run_end) / 2 / band.scale, cy
+
     def pick_plane(self, plane: str) -> None:
         """Expand the Body's Origin in the model tree and click the plane."""
         pat = plane + r"[-_ ]?[Pp]lane\d*"  # FreeCAD 1.1 shows "XY-plane"
@@ -409,8 +427,10 @@ class Hands:
             origin = self._find_row(rows, r"Origin\d*")
             if origin is None:
                 raise RuntimeError("Origin not found in the model tree")
-            self.click(*self._word_center(*origin))
-            screen.key(124)  # Right arrow: expand the selected tree item
+            arrow = self._expander(origin[0])
+            if arrow is None:
+                raise RuntimeError("Origin's expand arrow not found")
+            self.click(*arrow)  # the triangle left of the row's icons (clicking it doesn't select)
             time.sleep(0.4)
             hit = self._find_row(self.tree_rows(), pat)
             if hit is None:
@@ -471,7 +491,7 @@ class Hands:
         """Straight vertical edges: in an isometric wireframe view (hidden edges drawn too), take
         rows across the part, hover where dark lines cross them in a screenshot, and keep edges
         whose points just above and below differ only in height."""
-        self.look("Isometric")
+        self.look("Trimetric")  # in isometric, a box's back vertical edge hides behind the front one
         self.menu("View", "Draw Style", "Wireframe")
         try:
             time.sleep(0.3)
@@ -481,7 +501,7 @@ class Hands:
                 raise RuntimeError("part not visible")
             x0, y0, x1, y1 = box
             found: dict[str, Hover] = {}
-            for fy in (0.5, 0.62, 0.38, 0.72, 0.28):
+            for fy in (0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82, 0.1, 0.9):  # short edges too
                 y = y0 + (y1 - y0) * fy
                 for x in img.dark_crossings(y):
                     for dx in (0.0, -1.0, 1.0):
