@@ -80,10 +80,15 @@ class ViewImage:
         self.px0 = max(int((rect[0] - shot.x) * self.s), 0)
         self.py0 = max(int((rect[1] - shot.y) * self.s), 0)
         px1, py1 = int((rect[0] + rect[2] - shot.x) * self.s), int((rect[1] + rect[3] - shot.y) * self.s)
-        a = img[self.py0:py1:step, self.px0:px1:step]
+        full = img[self.py0:py1, self.px0:px1]
+        Hf, Wf = (full.shape[0] // step) * step, (full.shape[1] // step) * step
+        full = full[:Hf, :Wf]
+        a = full[::step, ::step]
         bg = np.median(a[:, :3], axis=1, keepdims=True)  # per row, from the view's left edge
         part = np.abs(a - bg).max(axis=2) > 18
-        dark = a.mean(axis=2) < 90  # edge lines
+        # Edge lines are 1-2 px wide: find them at full resolution; a block with any is an edge block.
+        dark_full = full.mean(axis=2) < 110
+        dark = dark_full.reshape(Hf // step, step, Wf // step, step).any(axis=(1, 3))
         mask = part & ~dark
         H, W = mask.shape
         mask[: int(H * 0.32), int(W * 0.82):] = False  # navigation cube
@@ -186,6 +191,7 @@ class Hands:
         self.mouse = screen.Mouse()
         self._status = None
         self.hovers = 0  # cursor positions read (for speed reports)
+        self._last = None  # (x, y, Hover | None) of the latest hover
 
     # -- reading the app -------------------------------------------------------
 
@@ -225,7 +231,8 @@ class Hands:
         if el is None:
             raise RuntimeError("3D view not found")
         x, y, w, h = self._frame(el)
-        panel = self._walk(lambda e: str(self.r._attr(e, "AXIdentifier") or "").endswith(".OverlayRight"))
+        panel = self._walk(lambda e: str(self.r._attr(e, "AXIdentifier") or "").endswith((".OverlayRight", ".Tasks"))
+                           and self._frame(e) is not None and self._frame(e)[2] > 0)
         f = self._frame(panel) if panel is not None else None
         if f is not None and f[2] > 0 and x < f[0] < x + w:
             w = f[0] - x
@@ -279,9 +286,15 @@ class Hands:
         else:
             self.menu("View", "Standard Views", view)
         self.press_tool("Std_ViewFitAll")
+        self._last = None
         time.sleep(0.25)
 
     def hover(self, x: float, y: float, wait: float = 0.012) -> Hover | None:
+        """What is under the cursor at (x, y). Moving to a new spot over geometry always changes the
+        status bar (at least the coordinates); if it doesn't change, the cursor is over nothing (or
+        over a panel) and the old message is stale."""
+        if self._last is not None and self._last[:2] == (x, y):
+            return self._last[2]
         before = self.status_text()
         self.mouse.move(x, y, settle=wait)
         deadline = time.time() + 0.035
@@ -290,13 +303,15 @@ class Hands:
             time.sleep(0.004)
             text = self.status_text()
         self.hovers += 1
-        h = parse_status(text)
+        h = parse_status(text) if text != before else None
         if h is not None:
             h.x, h.y = x, y
+        self._last = (x, y, h)
         return h
 
     def click(self, x: float, y: float, add: bool = False) -> None:
         self.mouse.click(x, y, command=add)  # Command-click adds to FreeCAD's selection on macOS
+        self._last = None
         time.sleep(0.15)
 
     # -- the canvas actions ------------------------------------------------------
@@ -387,7 +402,7 @@ class Hands:
 
     def pick_plane(self, plane: str) -> None:
         """Expand the Body's Origin in the model tree and click the plane."""
-        pat = plane + r"[_ ]?Plane\d*"
+        pat = plane + r"[-_ ]?[Pp]lane\d*"  # FreeCAD 1.1 shows "XY-plane"
         rows = self.tree_rows(scroll="top")
         hit = self._find_row(rows, pat)
         if hit is None:
