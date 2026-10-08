@@ -101,7 +101,8 @@ def step(srv: Server, actuator: AccessibilityActuator, action: str, stats: dict,
     """Perform `action` from outside: the session prepares and books it, accessibility performs it
     (request kinds in `inside` are performed by the session). With `hands`, selections in the
     3D view and model tree are made with the real mouse too."""
-    req = srv.call({"op": "ext_begin", "action": action, "inside": list(inside), "canvas": hands is not None})["request"]
+    req = srv.call({"op": "ext_begin", "action": action, "inside": list(inside), "canvas": hands is not None,
+                    "commands": True})["request"]
     if req.get("kind") == "pick":
         t, h0, problem = time.time(), hands.hovers, None
         try:
@@ -185,6 +186,7 @@ def main() -> None:
 
         prev_front = frontmost_pid()
         hands = Hands(reader, actuator.pid)
+        actuator.mouse = hands.mouse
         srv.call({"op": "pick_fallback", "on": not args.strict_picks})
         hands.front()
         if args.record:
@@ -237,6 +239,7 @@ def main() -> None:
                 proc, srv, reader, actuator = launch(args.port, args.mem_gb)
                 if hands is not None:
                     hands = Hands(reader, actuator.pid)
+                    actuator.mouse = hands.mouse
                     srv.call({"op": "pick_fallback", "on": not args.strict_picks})
                     hands.front()
             stats["episodes"].append(ep)

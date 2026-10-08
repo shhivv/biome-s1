@@ -101,6 +101,7 @@ class S1Config:
     ui_recent_fields: bool = False  # recent dialog edits carry which field they touched
     ui_pending_feature: bool = False  # a feature whose dialog is open does not count as built (ordinals)
     ui_param_match: bool = False  # numeric options say whether they hold the parameter stage's value
+    screen_state: bool = False  # sees only what the screen shows (freecad_s1/screen_state.py)
 
     def feature_opts(self) -> dict:
         """Featurization options this model was trained with."""
@@ -113,6 +114,8 @@ class S1Config:
             opts["ui_pending"] = True
         if self.ui_param_match:
             opts["ui_param"] = True
+        if self.screen_state:
+            opts["screen"] = True
         return opts
 
     @property

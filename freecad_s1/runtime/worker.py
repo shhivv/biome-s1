@@ -77,7 +77,8 @@ class Worker:
                 self.last_iou = value
             return out
         if op == "ext_begin":  # an action the client performs from outside the app (UiSession.begin_external)
-            return {"request": s.begin_external(req["action"], tuple(req.get("inside", ())), bool(req.get("canvas")))}
+            return {"request": s.begin_external(req["action"], tuple(req.get("inside", ())), bool(req.get("canvas")),
+                                                 bool(req.get("commands")))}
         if op == "pick_fallback":  # outside picks that miss: book the intended selection (and report it)
             s.pick_fallback = bool(req.get("on"))
             return {}

@@ -312,7 +312,12 @@ class Example:
 def make_example(state: State, goal: Goal, actions: list[str], acceptable: list[str] | None = None,
                  progress: int | None = None, invariant: bool = False, sentinel: bool = False,
                  ui: bool = False, ui_recent: bool = False, ui_pending: bool = False,
-                 ui_param: bool = False) -> Example:
+                 ui_param: bool = False, screen: bool = False) -> Example:
+    """`screen`: the model sees only what can be read off the screen (freecad_s1/screen_state.py)."""
+    if screen:
+        from ..screen_state import screen_state
+
+        state = screen_state(state)
     acc = set(acceptable or [])
     scale = goal.scale if goal.scale > 0 else 1.0
     return Example(encode_state(state, goal, invariant, sentinel, ui, ui_recent, ui_pending),

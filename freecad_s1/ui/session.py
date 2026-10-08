@@ -55,7 +55,9 @@ GUI_UNDO_LIMIT = 2000
 QUIET_CHECKBOXES = ("checkBoxUpdateView", "showTransparentPreviewCheckBox")
 
 _NUMBER = re.compile(r"-?\d+(?:[.,]\d+)?")
-MAX_COUNT = 100  # pattern occurrences above this are refused outright
+MAX_COUNT = 100
+# Commands without a task dialog that can be pressed on the toolbar from outside (begin_external(canvas=True)).
+GUI_COMMANDS = ("PartDesign_Body", "PartDesign_NewSketch", "Sketcher_LeaveSketch")  # pattern occurrences above this are refused outright
 
 
 def pump(n: int = 5) -> None:
@@ -437,7 +439,7 @@ class UiSession(GuiSession):
                 out.append({"name": o.Name, "valid": o.isValid(), **{k: v for k, v in vals.items() if k != "Constraints"}})
         return out
 
-    def begin_external(self, element: str, inside: tuple = (), canvas: bool = False) -> dict:
+    def begin_external(self, element: str, inside: tuple = (), canvas: bool = False, commands: bool = False) -> dict:
         """Prepare a dialog action to be performed from outside the app. Returns
         the request ({"kind": "command" | "number" | "choice" | "toggle" |
         "button", ...}); {"internal": True} for elements the session performs
@@ -447,6 +449,8 @@ class UiSession(GuiSession):
         role = S.role(element)
         if canvas and role == "canvas" and S.underlying(element).startswith("Select:") and self.pending is None:
             return self._begin_pick(element)
+        if commands and role == "cmd" and S.underlying(element) in GUI_COMMANDS and self.pending is None:
+            return self._begin_gui_command(element)
         if role not in ("set", "opt", "toggle", "click") and not (role == "cmd" and S.underlying(element) in S.DIALOG_COMMANDS):
             return {"internal": True}
         info = {"changed": False, "error": None, "done": False, "on_plan": element in self.expert()}
@@ -497,6 +501,67 @@ class UiSession(GuiSession):
         next(gen)
         self._external = (gen, info)
         return {"kind": "pick", "target": arg}
+
+    def _begin_gui_command(self, element: str) -> dict:
+        """A command without a task dialog (New Body, New Sketch, Leave Sketch) pressed on the
+        toolbar from outside. The session records what FreeCAD did, like its own executors would."""
+        command = S.underlying(element)
+        info = {"changed": False, "error": None, "done": False, "on_plan": element in self.expert()}
+        if not Gui.isCommandActive(command):
+            info["error"] = f"{command} is not active"
+            return {"error": info["error"], "info": info}
+        if command == "PartDesign_NewSketch":
+            ref = self.sel_refs[0] if len(self.sel_refs) == 1 else None
+            if self.body is None or ref is None or not ref[2].startswith(("Plane:", "Face")):
+                info["error"] = "select one plane or face first"  # (FreeCAD would open a plane picker)
+                return {"error": info["error"], "info": info}
+        self.recent.append(element)
+        before, sel_before = copy.deepcopy(self.meta), list(self.sel_refs)
+        names_before = {o.Name for o in self.doc.Objects}
+        undo_before = self.doc.UndoCount
+        goal_ref = progress(self.goal, self.meta)
+
+        def finish():
+            yield
+            if command == "Sketcher_LeaveSketch":
+                wait_until(lambda: self._gui_in_edit() is None, timeout=3.0)
+            else:
+                wait_until(lambda: {o.Name for o in self.doc.Objects} - names_before, timeout=3.0)
+            new = [o for o in self.doc.Objects if o.Name not in names_before]
+            if command == "PartDesign_Body":
+                body = next((o for o in new if o.TypeId == "PartDesign::Body"), None)
+                if body is None:
+                    info["error"] = "no body was created"
+                    return
+                role = "body" if self.meta.body is None else "other"
+                if self.meta.body is None:
+                    self.meta.body = body.Name
+                self.meta.objects[body.Name] = ObjMeta(body.Name, role, command=command)
+            elif command == "PartDesign_NewSketch":
+                sk = next((o for o in new if o.TypeId == "Sketcher::SketchObject"), None)
+                if sk is None:
+                    info["error"] = "no sketch was created"
+                    return
+                self.meta.objects[sk.Name] = ObjMeta(sk.Name, "sketch", goal_ref=goal_ref, command=command)
+                self.meta.edit = sk.Name
+                self._consume_selection()
+            elif command == "Sketcher_LeaveSketch":
+                if self._gui_in_edit() is not None:
+                    info["error"] = "still editing the sketch"
+                    return
+                self.meta.edit = None
+            n_tx = self.doc.UndoCount - undo_before
+            self._push_undo(UndoEntry(before, sel_before, doc_tx=n_tx > 0, n_tx=max(n_tx, 0)))
+            if not info["on_plan"]:
+                self.meta.dirty += 1
+            info["changed"] = True
+            self._refresh_validity()
+            self._sync_gui()
+
+        gen = finish()
+        next(gen)
+        self._external = (gen, info)
+        return {"kind": "command", "command": command}
 
     def gui_selection(self) -> list:
         """The GUI's selection as [(object, sorted sub-elements)], sub-elements of the

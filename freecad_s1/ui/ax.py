@@ -255,8 +255,19 @@ class AccessibilityActuator:
         kind = req["kind"]
         if kind == "command":
             cmd = req["command"]
-            el = self._find(lambda e: str(self.r._attr(e, "AXHelp") or "") == cmd
-                            and str(self.r._attr(e, "AXRole")) in ("AXButton", "AXMenuButton"), skip_dialog=True)
+            shown = {c: name for name, c in GROUPED_ACTIONS.items()}.get(cmd)
+
+            def is_button(e) -> bool:
+                if str(self.r._attr(e, "AXRole")) not in ("AXButton", "AXMenuButton"):
+                    return False
+                if str(self.r._attr(e, "AXHelp") or "") == cmd:
+                    return True
+                if shown is None:  # a grouped button shows its current action's name in bold
+                    return False
+                m = re.search(r"<b>([^<]+)</b>", str(self.r._attr(e, "AXDescription") or ""))
+                return bool(m) and m.group(1).strip() == shown
+
+            el = self._find(is_button, skip_dialog=True)
             self._press(el, f"toolbar button {cmd}")
         elif kind == "button":
             el = self._find(lambda e: str(self.r._attr(e, "AXRole")) == "AXButton"
