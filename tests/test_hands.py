@@ -50,3 +50,25 @@ def test_tree_rows():
     x, y = Hands._word_center(tip, word)
     assert tip.x + tip.w * 2 / 8 < x <= tip.x + tip.w  # on the name, right of the icon characters
     assert Hands._find_row([Text("PadXYZ", 0, 0, 10, 10)], "Pad\\d*") is None  # whole words only
+
+
+def test_perceived_tree_puts_back_collapsed_sketches():
+    from freecad_s1.ui.perceive import tree_objects, tree_state
+
+    rows = [Text("S1Doc2", 32, 244, 40, 12), Text("- • Body", 13, 260, 50, 12), Text("• & F Origin", 26, 276, 60, 12),
+            Text("• & Pad", 26, 292, 40, 12), Text("• & Pad001", 26, 308, 50, 12), Text("& Pocket", 26, 324, 50, 12),
+            Text("& Sketch003", 26, 340, 60, 12)]
+    tree = tree_state(tree_objects(rows))
+    assert [n.type.split("::")[1] for n in tree] == ["Body", "SketchObject", "Pad", "SketchObject", "Pad",
+                                                     "SketchObject", "Pocket", "SketchObject"]
+    assert [n.num["consumed"] for n in tree if "Sketch" in n.type] == [1.0, 1.0, 1.0, 0.0]
+    assert [n.num["tip"] for n in tree].index(1.0) == 6  # the Pocket
+    assert tree[-1].num["visible"] == 1.0 and tree[2].num["visible"] == 0.0
+
+
+def test_perceived_tree_nested_sketch_row():
+    from freecad_s1.ui.perceive import tree_objects, tree_state
+
+    rows = [Text("Body", 13, 260, 50, 12), Text("▾ Pad", 26, 292, 40, 12), Text("Sketch", 46, 308, 40, 12)]
+    tree = tree_state(tree_objects(rows))
+    assert [n.type.split("::")[1] for n in tree] == ["Body", "SketchObject", "Pad"]
