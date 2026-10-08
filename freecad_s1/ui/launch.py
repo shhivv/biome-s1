@@ -206,7 +206,7 @@ def launch_gui_script(script: str | Path, env: dict[str, str], log: str | Path |
         raise RuntimeError(f"a FreeCAD is already running {script}; kill it first (pkill -f {script})")
     env = {"S1_REPO": str(REPO_ROOT), "S1_MEM_LIMIT_GB": str(mem_limit_gb), "S1_TIMEOUT": str(timeout),
            "S1_PARENT_PID": str(os.getpid()),
-           **{k: os.environ[k] for k in ("S1_DEFAULT_SNAP",) if k in os.environ},  # training-goal options
+           **{k: os.environ[k] for k in ("S1_DEFAULT_SNAP", "S1_KEY_LOG") if k in os.environ},  # training-goal options
            **env}
     log = str(Path(log).resolve()) if log else os.devnull
     if sys.platform == "darwin":

@@ -96,14 +96,29 @@ class Window:
 
         ax = AS.AXUIElementCreateApplication(self.pid)
         AS.AXUIElementSetAttributeValue(ax, "AXFrontmost", True)
+        # Raise and focus the main (largest) window: keystrokes go to the key window, and the app
+        # also has invisible zero-size windows that must not be the one raised.
         err, wins = AS.AXUIElementCopyAttributeValue(ax, "AXWindows", None)
-        if err == 0 and wins:
-            AS.AXUIElementPerformAction(wins[0], "AXRaise")
+
+        def area(w):
+            e1, z = AS.AXUIElementCopyAttributeValue(w, "AXSize", None)
+            if e1 != 0 or z is None:
+                return 0
+            _, size = AS.AXValueGetValue(z, AS.kAXValueCGSizeType, None)
+            return size.width * size.height
+
+        wins = [w for w in (wins or []) if area(w) > 0] if err == 0 else []
+        if wins:
+            main = max(wins, key=area)
+            AS.AXUIElementPerformAction(main, "AXRaise")
+            AS.AXUIElementSetAttributeValue(main, "AXMain", True)
+            AS.AXUIElementSetAttributeValue(main, "AXFocused", True)
         AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(self.pid).activateWithOptions_(
             AppKit.NSApplicationActivateIgnoringOtherApps)
         deadline = time.time() + 3
         while time.time() < deadline:
             if frontmost_pid() == self.pid:
+                time.sleep(0.1)
                 return
             time.sleep(0.05)
         raise RuntimeError("could not bring the application to the front")
@@ -193,11 +208,14 @@ class Mouse:
         self.move(*self.home)
 
 
-def key(code: int, command: bool = False, shift: bool = False) -> None:
-    """A real key press (global; goes to the frontmost application)."""
+def key(code: int, command: bool = False, shift: bool = False, char: str | None = None) -> None:
+    """A real key press (global; goes to the frontmost application). Pass `char` for typed text:
+    macOS doesn't always derive the character from the key code."""
     flags = (Q.kCGEventFlagMaskCommand if command else 0) | (Q.kCGEventFlagMaskShift if shift else 0)
     for down in (True, False):
         ev = Q.CGEventCreateKeyboardEvent(None, code, down)
+        if char:
+            Q.CGEventKeyboardSetUnicodeString(ev, len(char), char)
         if flags:
             Q.CGEventSetFlags(ev, flags)
         Q.CGEventPost(Q.kCGHIDEventTap, ev)

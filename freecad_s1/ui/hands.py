@@ -427,12 +427,17 @@ class Hands:
             origin = self._find_row(rows, r"Origin\d*")
             if origin is None:
                 raise RuntimeError("Origin not found in the model tree")
-            arrow = self._expander(origin[0])
-            if arrow is None:
-                raise RuntimeError("Origin's expand arrow not found")
-            self.click(*arrow)  # the triangle left of the row's icons (clicking it doesn't select)
-            time.sleep(0.4)
-            hit = self._find_row(self.tree_rows(), pat)
+            for wait in (0.4, 0.6, 0.8):  # a click right after the app came to the front can be lost
+                arrow = self._expander(origin[0])
+                if arrow is None:
+                    raise RuntimeError("Origin's expand arrow not found")
+                self.click(*arrow)  # the triangle left of the row's icons (clicking it doesn't select)
+                time.sleep(wait)
+                rows = self.tree_rows()
+                hit = self._find_row(rows, pat)
+                if hit is not None:
+                    break
+                origin = self._find_row(rows, r"Origin\d*") or origin
             if hit is None:
                 raise RuntimeError(f"{plane} plane not found in the model tree")
         self.click(*self._word_center(*hit))

@@ -137,6 +137,10 @@ class UiSession(GuiSession):
         self.pick_fallback = False  # a wrong outside pick: book the intended selection anyway (reported)
         # FreeCAD offers Document Recovery after a previous instance died (e.g. killed by the watchdog).
         # The modal dialog blocks anything acting from outside the app; decline it whenever it shows.
+        self.key_log: list[str] = []  # last key events FreeCAD received (debugging outside actions)
+        if os.environ.get("S1_KEY_LOG") == "1":
+            self._key_filter = _KeyLogger(self.key_log)
+            QtWidgets.QApplication.instance().installEventFilter(self._key_filter)
         self._recovery_timer = QtCore.QTimer()
         self._recovery_timer.timeout.connect(self._decline_recovery)
         self._recovery_timer.start(400)
@@ -405,7 +409,7 @@ class UiSession(GuiSession):
                 "pending": None if self.pending is None else self.pending.command,
                 "ok_button": self._button("OK") is not None, "chain": chain[:8],
                 "modal": None if modal is None else f"{modal.metaObject().className()} {modal.windowTitle()}",
-                "messages": self.messages[-3:], "features": self._feature_summary(), "widgets": self._widget_summary(),
+                "messages": self.messages[-3:], "features": self._feature_summary(), "widgets": self._widget_summary(), "keys": self.key_log[-12:],
                 "selection": [f"{o.ObjectName}:{','.join(o.SubElementNames)}" for o in Gui.Selection.getSelectionEx()],
                 "preselection": str(getattr(Gui.Selection.getPreselection(), "SubElementNames", ""))}
 
@@ -692,3 +696,16 @@ class UiSession(GuiSession):
         self._refresh_validity()
         self._sync_gui()
         info["changed"] = True
+
+
+class _KeyLogger(QtCore.QObject):
+    def __init__(self, log: list) -> None:
+        super().__init__()
+        self.log = log
+
+    def eventFilter(self, obj, ev):  # noqa: N802 (Qt API)
+        if ev.type() in (QtCore.QEvent.KeyPress, QtCore.QEvent.ShortcutOverride):
+            kind = "press" if ev.type() == QtCore.QEvent.KeyPress else "shortcut?"
+            self.log.append(f"{kind} {ev.text()!r} key={ev.key()} -> {obj.metaObject().className()}#{obj.objectName()}")
+            del self.log[:-50]
+        return False

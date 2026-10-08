@@ -158,8 +158,9 @@ def accessibility_view(snapshot: dict, state: State, actions: list[str]) -> tupl
 #
 # What works on FreeCAD 1.1 (found by probing the Pad and Pocket dialogs):
 # - toolbar commands, check boxes, OK / Cancel: the accessibility "press" action;
-# - number fields: focus them through accessibility, then post select-all + the text + Tab
-#   as key events to the FreeCAD process (setting their AXValue is accepted but ignored).
+# - number fields: focus them through accessibility, then select-all, paste the text (cmd+V) and
+#   Tab, as key events posted to the FreeCAD process (setting their AXValue is accepted but ignored;
+#   typed characters sometimes arrive without their text and are dropped, shortcuts don't).
 #   Lengths and angles (Gui::QuantitySpinBox) only take typed text when editing finishes,
 #   which in the background needs a step: up then down after typing.
 # - dropdowns: unreliable. "press" sometimes opens the popup, but posted arrow keys + Return
@@ -174,7 +175,7 @@ def accessibility_view(snapshot: dict, state: State, actions: list[str]) -> tupl
 # user's mouse and keyboard are untouched.
 
 _KEYCODES = {"a": 0, "0": 29, "1": 18, "2": 19, "3": 20, "4": 21, "5": 23, "6": 22, "7": 26, "8": 28, "9": 25,
-             ".": 47, "-": 27, "tab": 48, "return": 36, "down": 125, "up": 126}
+             ".": 47, "-": 27, "v": 9, "tab": 48, "return": 36, "down": 125, "up": 126}
 
 
 class AccessibilityActuator:
@@ -187,6 +188,7 @@ class AccessibilityActuator:
 
         self.Q = Quartz
         self.pid = pid
+        self.mouse = None  # set (a screen.Mouse) when the app is in front: fields are clicked, keys are real
 
     def _find(self, pred, skip_dialog: bool = False):
         stack = list(self.r._attr(self.r.app, "AXWindows") or [])
@@ -207,10 +209,40 @@ class AccessibilityActuator:
     def _key(self, name: str, command: bool = False) -> None:
         for down in (True, False):
             ev = self.Q.CGEventCreateKeyboardEvent(None, _KEYCODES[name], down)
+            if len(name) == 1 and not command:  # attach the character: macOS doesn't always derive it
+                self.Q.CGEventKeyboardSetUnicodeString(ev, 1, name)
             if command:
                 self.Q.CGEventSetFlags(ev, self.Q.kCGEventFlagMaskCommand)
-            self.Q.CGEventPostToPid(self.pid, ev)
+            if self.mouse is not None:  # in front: real key events, to the focused field
+                self.Q.CGEventPost(self.Q.kCGHIDEventTap, ev)
+            else:
+                self.Q.CGEventPostToPid(self.pid, ev)
             time.sleep(0.02)
+
+    def _paste(self, text: str) -> None:
+        """Enter text with cmd+V. Posted key events don't reliably carry their character (Qt then
+        sees an empty keystroke and ignores it), while shortcuts work by key code. The clipboard is
+        restored afterwards, every item and type."""
+        import AppKit
+
+        pb = AppKit.NSPasteboard.generalPasteboard()
+        saved = [{t: it.dataForType_(t) for t in it.types()} for it in (pb.pasteboardItems() or [])]
+        try:
+            pb.clearContents()
+            pb.setString_forType_(text, AppKit.NSPasteboardTypeString)
+            self._key("v", command=True)
+            time.sleep(0.15)
+        finally:
+            pb.clearContents()
+            items = []
+            for d in saved:
+                item = AppKit.NSPasteboardItem.alloc().init()
+                for t, data in d.items():
+                    if data is not None:
+                        item.setData_forType_(data, t)
+                items.append(item)
+            if items:
+                pb.writeObjects_(items)
 
     def _press(self, el, what: str) -> None:
         if el is None:
@@ -237,17 +269,18 @@ class AccessibilityActuator:
             el = self._field(req["field"])
             if el is None:
                 raise RuntimeError(f"accessibility: field {req['field']} not found")
+            # Focus through accessibility, never by clicking where the field claims to be: in a
+            # scrolled task panel that spot can be another widget (e.g. the Python console).
             self.AS.AXUIElementSetAttributeValue(el, "AXFocused", True)
             time.sleep(0.15)
             self._key("a", command=True)
-            for ch in req["text"]:
-                self._key(ch)
-            if req["unit"] != "count":
-                # FreeCAD's QuantitySpinBox keeps typed text pending until editing finishes, which
-                # needs a real focus change (not available in the background) or Return (which
-                # would press the dialog's OK). Stepping commits the pending text: up, then down.
-                self._key("up")
-                self._key("down")
+            self._paste(req["text"])
+            # Spin boxes keep entered text pending until editing finishes, which needs a real focus
+            # change (not available in the background, unreliable in front) or Return (which would
+            # press the dialog's OK). Stepping commits the pending text: up, then down. The session
+            # checks the value afterwards (and refuses counts above its cap).
+            self._key("up")
+            self._key("down")
             self._key("tab")
             time.sleep(0.2)
         elif kind == "choice":
