@@ -15,6 +15,7 @@ import numpy as np
 from .actions import CATALOGUE
 from .ui import spec as UIS
 from .model.featurize import Example, make_example
+from .screen_state import OkMemory
 from .schema import Goal, State
 
 CACHE_VERSION = 5
@@ -97,15 +98,20 @@ def _load_shard(args: tuple[str, dict]) -> Dataset:
             return pickle.load(fh)
     ds = Dataset()
     goals: dict[str, Goal] = {}
+    memory: dict[str, OkMemory] = {}  # per episode (records of several episodes interleave)
     for rec in read_records(path):
         if "goal" in rec:
             goals[rec["ep"]] = Goal.from_json(rec["goal"])
             continue
+        state = State.from_json(rec["state"])
+        if opts.get("ui_param") or opts.get("ui_ok"):
+            UIS.annotate_targets(state.ui, goals[rec["ep"]], rec.get("progress"))
+        if opts.get("ui_ok"):
+            mem = memory.setdefault(rec["ep"], OkMemory())
+            mem.after(state)  # the action of this episode's previous record led here
+            mem.before(state)
         if not set(rec["acceptable"]) & set(rec["actions"]):
             continue  # no correct option offered (rare GUI corner case): no learning signal
-        state = State.from_json(rec["state"])
-        if opts.get("ui_param"):
-            UIS.annotate_targets(state.ui, goals[rec["ep"]], rec.get("progress"))
         ex = make_example(state, goals[rec["ep"]], rec["actions"], rec["acceptable"], rec.get("progress"), **opts)
         ds.add(ex, rec["ep"], rec["level"], rec["noise"], rec["acceptable"])
     with open(cache, "wb") as fh:

@@ -82,6 +82,11 @@ def run_episodes(policy: Policy, vec: VecEnv, specs: list[dict], sample: bool = 
     test: the policy must notice and repair the damage); those steps don't
     count toward agreement and the step budget is doubled."""
     eps: list[Episode] = vec.reset(specs)
+    ok_mem = None
+    if policy.model.cfg.feature_opts().get("ui_ok"):
+        from .screen_state import OkMemory
+
+        ok_mem = [OkMemory() for _ in eps]
     expert_len = [ep.budget // 2 - 3 for ep in eps]  # step_budget = 2 * plan + 6
     if perturb > 0:
         for ep in eps:
@@ -90,6 +95,9 @@ def run_episodes(policy: Policy, vec: VecEnv, specs: list[dict], sample: bool = 
     active = list(range(len(eps)))
     while active:
         cur = [eps[i] for i in active]
+        if ok_mem is not None:
+            for i in active:
+                ok_mem[i].before(eps[i].state)
         chosen = policy.act([e.state for e in cur], [e.goal for e in cur], [e.actions for e in cur], sample=sample)
         for k, i in enumerate(active):
             e = eps[i]
@@ -112,6 +120,8 @@ def run_episodes(policy: Policy, vec: VecEnv, specs: list[dict], sample: bool = 
             e.history.append(a)
             if r["state"] is not None:
                 e.state, e.actions = State.from_json(r["state"]), r["actions"]
+                if ok_mem is not None:
+                    ok_mem[i].after(e.state)
             e.progress = r.get("progress", -1)
             prev_expert, e.expert = e.expert, r["expert"]
             if r["info"].get("crashed"):  # FreeCAD died (UI envs); counted as a failure, reported separately

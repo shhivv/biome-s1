@@ -104,7 +104,7 @@ def _pending_feature(state: State) -> int | None:
 
 
 def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bool = False, ui: bool = False,
-                 ui_recent: bool = False, ui_pending: bool = False) -> Tokens:
+                 ui_recent: bool = False, ui_pending: bool = False, ui_ok: bool = False) -> Tokens:
     """`invariant` (H5): drop numeric features whose magnitude grows with the
     length of the build (tree size, number of intents, intents remaining) and
     express face/edge counts relative to the target, so longer goals do not
@@ -173,6 +173,7 @@ def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bo
         num = [*sel.normal, _clip(sel.offset / scale), sel.count / 10]
         rows.append((SEG_SEL, _SEL.get(sel.kind, _SEL["other"]), _NODE_TYPE.get(sel.object_type, 0), i, num))
 
+    flags = list(reversed(state.recent_flags)) if ui_ok else []
     for i, act in enumerate(reversed(state.recent)):
         if ui:
             r = UIS.role(act)
@@ -180,6 +181,9 @@ def encode_state(state: State, goal: Goal, invariant: bool = False, sentinel: bo
             if ui_recent and r in ("set", "opt", "toggle") and UIS.field_name(act) in _FIELD:
                 num = [0.0] * len(UI_FIELDS)
                 num[_FIELD[UIS.field_name(act)]] = 1.0
+            if ui_ok and act == "click:OK" and i < len(flags):  # OK pressed with every field on target
+                num = [0.0] * (len(UI_FIELDS) + 1)
+                num[len(UI_FIELDS)] = flags[i]
             rows.append((SEG_RECENT, _ACT.get(UIS.underlying(act) or act, 0), B_VOCAB + _ROLE.get(r, 0), i, num))
         else:
             rows.append((SEG_RECENT, _ACT.get(act, 0), 0, i, []))
@@ -312,7 +316,7 @@ class Example:
 def make_example(state: State, goal: Goal, actions: list[str], acceptable: list[str] | None = None,
                  progress: int | None = None, invariant: bool = False, sentinel: bool = False,
                  ui: bool = False, ui_recent: bool = False, ui_pending: bool = False,
-                 ui_param: bool = False, screen: bool = False) -> Example:
+                 ui_param: bool = False, screen: bool = False, ui_ok: bool = False) -> Example:
     """`screen`: the model sees only what can be read off the screen (freecad_s1/screen_state.py)."""
     if screen:
         from ..screen_state import screen_state
@@ -320,7 +324,7 @@ def make_example(state: State, goal: Goal, actions: list[str], acceptable: list[
         state = screen_state(state)
     acc = set(acceptable or [])
     scale = goal.scale if goal.scale > 0 else 1.0
-    return Example(encode_state(state, goal, invariant, sentinel, ui, ui_recent, ui_pending),
+    return Example(encode_state(state, goal, invariant, sentinel, ui, ui_recent, ui_pending, ui_ok),
                    encode_actions(actions, ui, state.ui, scale, ui_param),
                    np.array([a in acc for a in actions], dtype=bool), -1 if progress is None else int(progress))
 

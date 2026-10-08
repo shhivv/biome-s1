@@ -142,6 +142,9 @@ class State:
     events: list[str] = field(default_factory=list)  # recent observer events (debug/telemetry)
     shape: ShapeInfo = field(default_factory=ShapeInfo)
     ui: dict[str, Any] | None = None  # open task dialog and its fields (UI-level sessions only, see ui/teacher.py)
+    # Per recent action (aligned with `recent`): 1.0 for an OK pressed while every number field held its target
+    # (the agent saw that on screen when it pressed OK; afterwards the values are no longer shown).
+    recent_flags: list[float] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -157,6 +160,7 @@ class State:
             tree=[Node(**n) for n in d.get("tree", [])],
             selection=[SelItem(**{**s, "normal": tuple(s["normal"])}) for s in d.get("selection", [])],
             recent=list(d.get("recent", [])),
+            recent_flags=list(d.get("recent_flags", [])),
             events=list(d.get("events", [])),
             shape=ShapeInfo(**{**d["shape"], "bbox": tuple(d["shape"]["bbox"])}),
             ui=d.get("ui"),

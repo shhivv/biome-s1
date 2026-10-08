@@ -34,3 +34,45 @@ def screen_state(state: State) -> State:
     tree = [dataclasses.replace(n, num={k: v for k, v in n.num.items() if k in SCREEN_NODE_KEYS}, geo={}, cons={})
             for n in state.tree]
     return dataclasses.replace(state, tree=tree, shape=ShapeInfo())
+
+
+def ok_on_target(ui: dict | None) -> float:
+    """1.0 if pressing OK now commits on-target values: every enabled number field with a target
+    (the parameter stage's value, shown next to what the field holds) already holds it."""
+    from .ui.spec import value_matches
+
+    if not ui or not ui.get("dialog"):
+        return 0.0
+    for f in ui.get("fields", {}).values():
+        if f.get("kind") == "number" and f.get("enabled", True) and f.get("target") is not None:
+            if f.get("value") is None or not value_matches(f["target"], f["value"]):
+                return 0.0
+    return 1.0
+
+
+class OkMemory:
+    """Keeps `State.recent_flags` for one episode. Call `before(state)` with the state an action is
+    chosen in and `after(new_state)` with the state it led to. An action that was refused without
+    entering the history (e.g. a command while a dialog is open) adds no flag."""
+
+    def __init__(self) -> None:
+        self.flags: list[float] = []
+        self._pending = 0.0
+        self._recent: list[str] | None = None
+
+    def before(self, state: State) -> None:
+        self._pending = ok_on_target(state.ui)
+        self._recent = list(state.recent)
+        state.recent_flags = self.window(state)
+
+    def after(self, new_state: State | None) -> None:
+        if new_state is None:
+            return
+        if self._recent is not None and new_state.recent and new_state.recent != self._recent:
+            self.flags.append(self._pending if new_state.recent[-1] == "click:OK" else 0.0)
+        new_state.recent_flags = self.window(new_state)
+
+    def window(self, state: State) -> list[float]:
+        n = len(state.recent)
+        out = self.flags[-n:] if n else []
+        return [0.0] * (n - len(out)) + out

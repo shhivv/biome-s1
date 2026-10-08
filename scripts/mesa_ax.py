@@ -34,6 +34,7 @@ from freecad_s1.model.net import from_pretrained, load_checkpoint
 from freecad_s1.rollout import Policy
 from freecad_s1.runtime.fcenv import PROTOCOL_PREFIX
 from freecad_s1.schema import Goal, State
+from freecad_s1.screen_state import OkMemory
 from freecad_s1.ui.ax import AccessibilityActuator, AccessibilityReader, accessibility_view
 from freecad_s1.ui.launch import find_pids, launch_gui_script
 
@@ -201,6 +202,7 @@ def main() -> None:
                 r = srv.call(job)
                 goal = Goal.from_json(r["goal"])
                 state, actions = State.from_json(r["state"]), r["actions"]
+                ok_mem = OkMemory()  # models with ui_ok_memory: a recent OK says whether fields were on target
                 done, steps = False, 0
                 while steps < r["budget"]:
                     snap = reader.read()
@@ -209,6 +211,7 @@ def main() -> None:
                     for n in notes:
                         key = re.sub(r"\d+(\.\d+)?", "#", n)[:90]
                         stats["notes"][key] = stats["notes"].get(key, 0) + 1
+                    ok_mem.before(state)
                     seen = State.from_json({**state.to_json(), "ui": ui})
                     action = policy.act([seen], [goal], [elements])[0]
                     stats["steps"] += 1
@@ -229,6 +232,7 @@ def main() -> None:
                         done = True
                         break
                     state, actions = State.from_json(s["state"]), s["actions"]
+                    ok_mem.after(state)
                 sc = srv.call({"op": "score"})
                 ep = {"episode": k, "success": bool(done and sc["match"]), "iou": round(sc["iou"], 3), "steps": steps,
                       "features": [f.kind for f in goal.features]}
